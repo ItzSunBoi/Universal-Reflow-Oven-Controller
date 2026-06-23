@@ -14,22 +14,34 @@
 // purpose SPI controllers, used here as FSPI for the display and HSPI for the
 // MAX31865.
 
+// Physical connector groups on the reused carrier PCB:
+// A: GPIO13, GPIO14, GPIO35 + 3.3 V + GND
+// B: GPIO36, GPIO3, GPIO21, GPIO47, GPIO48, GPIO46, GPIO45
+// C: GPIO4, GPIO5, GPIO6, GPIO42 + 5 V + GND
+// D: GPIO10, GPIO11, GPIO12, GPIO41 + 5 V + GND
+// E: GPIO8, GPIO9, GPIO18, GPIO40 + 5 V + GND
+// F: GPIO39, GPIO17, GPIO16, GPIO15 + 5 V + GND
+// G: GPIO1, GPIO2, GPIO7, GPIO38 + 5 V + GND
+//
+// Allocation: A=E-stop, B=buzzer, C=buttons, D=TFT, E=MAX31865,
+// F=SSR, G=cooling fan. No active module spans multiple connector groups.
+
 // ST7789 display bus (FSPI). The display is write-only, so MISO is unused.
-constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL
-constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA
-constexpr int8_t PIN_TFT_DC   = 9;
-constexpr int8_t PIN_TFT_RST  = 8;   // Display RES
-constexpr int8_t PIN_TFT_BL   = 7;   // Display BLK
+constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL; connector group D
+constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA; connector group D
+constexpr int8_t PIN_TFT_DC   = 41;  // Connector group D
+constexpr int8_t PIN_TFT_RST  = 10;  // Display RES; connector group D
+constexpr int8_t PIN_TFT_BL   = -1;  // BLK tied to display VCC to keep one JST set
 constexpr bool TFT_BACKLIGHT_ACTIVE_HIGH = true;
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
 // MAX31865 bus (HSPI).
-constexpr int8_t PIN_MAX31865_CLK = 14;
-constexpr int8_t PIN_MAX31865_SDO = 13;  // MAX31865 -> ESP32 MISO
-constexpr int8_t PIN_MAX31865_SDI = 10;  // ESP32 MOSI -> MAX31865
-constexpr int8_t PIN_MAX31865_CS  = 21;
+constexpr int8_t PIN_MAX31865_CLK = 8;   // Connector group E
+constexpr int8_t PIN_MAX31865_SDO = 9;   // MAX31865 -> ESP32 MISO; group E
+constexpr int8_t PIN_MAX31865_SDI = 18;  // ESP32 MOSI -> MAX31865; group E
+constexpr int8_t PIN_MAX31865_CS  = 40;  // Connector group E
 constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
 constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
 constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
@@ -43,7 +55,7 @@ constexpr int8_t PIN_BUTTON_RIGHT  = 6;
 
 // Emergency stop: normally-closed switch from GPIO to GND.
 // Add an external 10 kOhm pull-up to 3.3 V. Healthy = LOW, fault/open = HIGH.
-constexpr int8_t PIN_ESTOP = 15;
+constexpr int8_t PIN_ESTOP = 13;  // Dedicated 3.3 V connector group A
 constexpr uint8_t ESTOP_ACTIVE_LEVEL = HIGH;
 
 // SSR output. Active-high SSR input is strongly recommended.
@@ -51,11 +63,11 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = 17;
+constexpr int8_t PIN_BUZZER = 21;  // Dedicated header group B
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = 18;
+constexpr int8_t PIN_COOLING_FAN = 38;  // Dedicated connector group G
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;

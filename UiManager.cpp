@@ -889,7 +889,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.1", 79, 2, cText_);
+  drawCentered("Controller v1.2", 79, 2, cText_);
 
   tft_.setTextSize(1);
   tft_.setTextColor(cMuted_);

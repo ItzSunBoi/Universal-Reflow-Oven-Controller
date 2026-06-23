@@ -1,28 +1,17 @@
-# Universal Reflow Controller v1.1
+# Universal Reflow Controller v1.2
 
-Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 ST7789 display with no exposed chip-select pin, a MAX31865/PT100 interface, three UI buttons, a dedicated normally-closed emergency-stop input, and a zero-cross AC SSR.
+Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 ST7789 SPI display, a MAX31865/PT100 temperature interface, three UI buttons, a dedicated normally-closed emergency-stop input, and a zero-cross AC SSR.
 
-The interface preserves the approved dark 240x240 design: cyan live values, green success, yellow profile/status information, orange heater output, red faults, fixed header placement, and fixed three-button legends along the bottom.
+The interface preserves the original dark 240x240 design: cyan live values, green success, yellow profile/status information, orange heat output, red faults, fixed header placement, and fixed three-button legends along the bottom.
 
-## Important v1.1 hardware change
+## Carrier PCB connector allocation
 
-The display exposes only:
+Version 1.2 is mapped specifically for the reused carrier PCB connector groups supplied by the user. The TFT, MAX31865, three-button panel, E-stop, SSR interface, optional buzzer, and optional fan each occupy one connector group and do not share active connector sets. See `WIRING.md` for the exact mapping.
 
-```text
-GND VCC SCL SDA RES DC BLK
-```
-
-Its controller is permanently selected because there is no CS pin. It therefore cannot safely share clock and data wires with the MAX31865. Version 1.1 uses two independent ESP32-S3 hardware SPI controllers:
-
-- **FSPI:** ST7789 display, `SCL=GPIO12`, `SDA=GPIO11`
-- **HSPI:** MAX31865, `CLK=GPIO14`, `SDO=GPIO13`, `SDI=GPIO10`, `CS=GPIO21`
-
-The MAX31865 `RDY` output is optional and is not connected. The firmware polls the converter.
 
 ## Implemented features
 
-- Separate hardware SPI controllers for the CS-less ST7789 and MAX31865.
-- ST7789 initialized with CS set to `-1`.
+- Shared hardware SPI bus for the ST7789 and MAX31865, with separate chip-select pins.
 - 240x240 UI pages for home, profiles, profile details, running graph, run details, completion, profile editor, stage editor, profile naming, menu, manual heat, calibration, logs, settings, about, and faults.
 - Up to 8 profiles in ESP32 NVS flash.
 - Add a profile by duplicating the selected profile, then rename and edit it.
@@ -59,7 +48,7 @@ The ESP32 `Preferences` and `SPI` libraries are included with the Espressif Ardu
 - USB CDC On Boot: choose according to your programming connection
 - Partition scheme: any 16 MB scheme retaining the normal NVS partition
 
-Open `UniversalReflowController_v1_1.ino` from the `UniversalReflowController_v1_1` folder.
+Open `UniversalReflowController_v1_0.ino` from a folder with the same name.
 
 ## Configuration
 
@@ -75,31 +64,6 @@ constexpr bool TFT_INVERT_COLORS = true;
 ```
 
 Check the actual reference resistor fitted to the MAX31865 board. PT100 boards commonly use approximately 430 ohms; PT1000 boards require a different value and `RTD_NOMINAL_OHMS` must also be changed.
-
-## Default wiring summary
-
-### Display
-
-| Display | ESP32-S3 |
-|---|---:|
-| SCL | GPIO12 |
-| SDA | GPIO11 |
-| RES | GPIO8 |
-| DC | GPIO9 |
-| BLK | GPIO7 |
-| CS | Not present |
-
-### MAX31865
-
-| MAX31865 | ESP32-S3 |
-|---|---:|
-| CLK | GPIO14 |
-| SDO | GPIO13 |
-| SDI | GPIO10 |
-| CS | GPIO21 |
-| RDY | Not connected |
-
-See `WIRING.md` before connecting `VIN` or `3V3`; modules differ in whether the `3V3` pin is an input or regulator output.
 
 ## Default button behavior
 
@@ -137,7 +101,7 @@ float ki_ = 0.10f;
 float kd_ = 18.0f;
 ```
 
-These are starting values, not universal tuning. Oven power, thermal mass, fan placement, probe placement, and SSR cycle time all affect tuning. First test with the heater electrically isolated or with a low-risk test load.
+These are safe starting values, not universal tuning. Oven power, thermal mass, fan placement, probe placement, and SSR cycle time all affect tuning. First test with the heater electrically isolated or with a low-risk test load.
 
 ## Profile model
 
@@ -164,18 +128,17 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 1. Keep mains disconnected.
 2. Confirm the SSR output is inactive during reset and boot.
 3. Confirm opening the E-stop circuit immediately extinguishes the SSR input indicator.
-4. Confirm the TFT and MAX31865 use separate SCK and MOSI wires.
-5. Confirm that display updates do not alter MAX31865 readings and sensor reads do not corrupt the display.
-6. Confirm the PT100 reading at room temperature against a trusted thermometer.
-7. Test the SSR with a low-voltage load or isolated indicator first.
-8. Install an independent thermal fuse in series with the heater.
-9. Keep all exposed mains conductors enclosed and earthed appropriately.
-10. Tune and validate profiles using an independent probe attached to a sacrificial PCB before processing valuable boards.
+4. Confirm the display and MAX31865 have different CS lines.
+5. Confirm the PT100 reading at room temperature against a trusted thermometer.
+6. Test the SSR with a low-voltage load or isolated indicator first.
+7. Install an independent thermal fuse in series with the heater.
+8. Keep all exposed mains conductors enclosed and earthed appropriately.
+9. Tune and validate profiles using a thermocouple attached to a sacrificial PCB before processing valuable boards.
 
 ## Files
 
-- `UniversalReflowController_v1_1.ino`: setup and cooperative main loop
-- `Config.h`: dual-SPI pin mapping and hardware constants
+- `UniversalReflowController_v1_0.ino`: setup and cooperative main loop
+- `Config.h`: pin mapping and hardware constants
 - `Types.h`: profile, stage, fault, settings, and log structures
 - `Safety.*`: E-stop ISR and heater inhibit latch
 - `TemperatureSensor.*`: MAX31865/PT100 driver wrapper
@@ -184,7 +147,7 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 - `ProfileStore.*`: NVS profile/settings/log persistence with CRC
 - `ButtonInput.*`: debounce, short press, long press, and repeat events
 - `UiManager.*`: complete 240x240 interface and editors
-- `WIRING.md`: detailed pin map and module-power cautions
+- `WIRING.md`: detailed default pin map and wiring notes
 - `SAFETY.md`: hardware safety requirements
 - `ARCHITECTURE.md`: module, state-machine, storage, and UI design
 - `VALIDATION.md`: checks completed and real-hardware commissioning work remaining

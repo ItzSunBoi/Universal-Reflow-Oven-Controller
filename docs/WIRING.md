@@ -1,98 +1,92 @@
-# Default wiring for the CS-less 240x240 display
+# Connector-optimized wiring for the reused ESP32-S3 carrier PCB
 
-Change these assignments in `Config.h` if they do not match your PCB.
+This map treats each slash-separated pin group as one physical connector set. It prioritizes one connector per module and avoids sharing connector groups between active modules.
 
-## Why two SPI buses are required
+## Connector groups
 
-The 1.3-inch display exposes `GND VCC SCL SDA RES DC BLK` and has no chip-select pin. Its ST7789 controller is therefore permanently selected. It must not share `SCL/SCK` or `SDA/MOSI` with the MAX31865, because MAX31865 traffic would also be clocked into the display.
+| Group | GPIO pins | Power available | Assigned module |
+|---|---|---|---|
+| A | 13, 14, 35 | 3.3 V + GND | Dedicated E-stop |
+| B | 36, 3, 21, 47, 48, 46, 45 | Header group | Dedicated optional buzzer on GPIO21 |
+| C | 4, 5, 6, 42 | 5 V + GND | Three-button control panel |
+| D | 10, 11, 12, 41 | 5 V + GND | CS-less ST7789 display |
+| E | 8, 9, 18, 40 | 5 V + GND | MAX31865 |
+| F | 39, 17, 16, 15 | 5 V + GND | Dedicated SSR interface on GPIO16 |
+| G | 1, 2, 7, 38 | 5 V + GND | Dedicated optional cooling fan on GPIO38 |
 
-The ESP32-S3 has two independent general-purpose SPI controllers. This project uses:
+GPIO3, GPIO45, and GPIO46 are intentionally unused because they are ESP32-S3 strapping pins. The design also leaves GPIO42, GPIO14, GPIO35, GPIO36, GPIO47, GPIO48, GPIO39, GPIO17, GPIO15, GPIO1, GPIO2, and GPIO7 available for later expansion.
 
-- **FSPI** for the ST7789 display
-- **HSPI** for the MAX31865
+## ST7789 display: connector group D
 
-The two buses use different physical clock and data pins.
+The display has no chip-select pin and uses its own FSPI controller.
 
-## ST7789 display, FSPI
+| Display pin | Carrier connection |
+|---|---:|
+| SCL | GPIO12 |
+| SDA | GPIO11 |
+| RES | GPIO10 |
+| DC | GPIO41 |
+| BLK | Tie to the display supply, subject to module voltage rating |
+| VCC | Connector supply only if the display module accepts it |
+| GND | GND |
 
-| Display pin | ESP32-S3 GPIO | Notes |
-|---|---:|---|
-| GND | GND | Common logic ground |
-| VCC | 3.3 V | Verify the module voltage before connection |
-| SCL | 12 | TFT SPI clock |
-| SDA | 11 | TFT MOSI/data, not I2C SDA |
-| RES | 8 | Display reset |
-| DC | 9 | Command/data selection |
-| BLK | 7 | Backlight control; drive appropriately for the module |
+Tying BLK to the display supply reduces the display to exactly four GPIO signals, allowing it to fit entirely on group D. Firmware backlight dimming is disabled by setting `PIN_TFT_BL = -1`.
 
-There is deliberately no TFT CS definition. The Adafruit constructor receives `-1` for CS.
+If the display is 3.3 V-only, do not feed it from the connector's 5 V rail. Add a local 3.3 V regulator or provide 3.3 V separately while retaining the four group-D signal wires.
 
-## MAX31865, HSPI
+## MAX31865: connector group E
 
-| MAX31865 pin | ESP32-S3 GPIO | Meaning |
-|---|---:|---|
-| GND | GND | Common logic ground |
-| CLK | 14 | HSPI clock |
-| SDO | 13 | MAX31865 data out to ESP32 MISO |
-| SDI | 10 | ESP32 MOSI to MAX31865 data in |
-| CS | 21 | Active-low chip select |
-| RDY | not connected | Optional data-ready output; firmware polls instead |
+The MAX31865 uses its own HSPI controller because the display is permanently selected.
 
-### MAX31865 power pins
+| MAX31865 pin | Carrier connection |
+|---|---:|
+| CLK | GPIO8 |
+| SDO | GPIO9 |
+| SDI | GPIO18 |
+| CS | GPIO40 |
+| RDY | Not connected |
+| VIN | Connector 5 V only if the breakout VIN is rated for 5 V |
+| GND | GND |
+| 3V3 | Leave disconnected when it is a regulator output |
 
-Many modules with both `VIN` and `3V3` are Adafruit-style boards where `VIN` feeds an onboard regulator and `3V3` is the regulator output. Do not connect both power pins together.
+Confirm whether the breakout's `3V3` pin is an output or input before powering it. Do not connect VIN and 3V3 together.
 
-Before powering the board, check its product page or trace the regulator:
+## Three-button panel: connector group C
 
-- If `3V3` is explicitly an input, power it from ESP32 3.3 V and leave `VIN` open.
-- If `3V3` is a regulator output, power `VIN` according to the module specification and leave `3V3` open.
-- Adafruit-style boards normally accept 3–5 V on `VIN`, but an unverified clone should not be assumed to have identical protection or level shifting.
+| Button | GPIO |
+|---|---:|
+| Left | GPIO4 |
+| Middle | GPIO5 |
+| Right | GPIO6 |
 
-The MAX31865 logic signals must remain compatible with 3.3 V ESP32 GPIO.
+Each momentary button connects its GPIO to GND when pressed. GPIO42 remains spare. The 5 V pin is not required by a passive button panel.
 
-## User buttons
+## Dedicated E-stop: connector group A
 
-| Function | GPIO | Wiring |
-|---|---:|---|
-| Left | 4 | Momentary switch to GND |
-| Middle | 5 | Momentary switch to GND |
-| Right | 6 | Momentary switch to GND |
+| Signal | Connection |
+|---|---|
+| E-stop sense | GPIO13 |
+| Pull-up supply | 3.3 V |
+| Return | GND |
 
-The firmware enables internal pull-ups. External 10 kOhm pull-ups are useful in an electrically noisy oven enclosure.
+Use a normally-closed E-stop contact from GPIO13 to GND and an external 10 kΩ pull-up from GPIO13 to 3.3 V. Healthy wiring reads LOW. Pressing the E-stop or breaking the cable reads HIGH and triggers the interrupt.
 
-## E-stop
+For a real emergency stop, use a dual-contact E-stop. The second normally-closed contact must interrupt the hardware SSR-enable, contactor coil, or heater-power safety chain independently of firmware.
 
-| Function | GPIO | Wiring |
-|---|---:|---|
-| Normally-closed E-stop input | 15 | NC contact to GND, 10 kOhm pull-up to 3.3 V |
+## Dedicated SSR interface: connector group F
 
-Healthy wiring produces LOW. Pressing the E-stop, disconnecting the switch, or breaking the wire produces HIGH and latches a fault.
+| Signal | Connection |
+|---|---:|
+| SSR command | GPIO16 |
+| Driver supply | 5 V if required by the interface |
+| Ground | GND |
 
-For real emergency-stop behavior, use a dual-contact E-stop:
+Use an appropriate transistor or optocoupler interface. Add a hardware pull-down so the SSR command remains off during reset or loss of ESP32 power. GPIO39, GPIO17, and GPIO15 remain spare in this connector.
 
-- one NC contact for GPIO15 fault detection
-- one NC contact in the hardware SSR-enable, contactor-coil, or heater-power safety chain
+## Optional buzzer: group B
 
-## SSR
+The firmware assigns the optional buzzer to GPIO21. This avoids the strapping pins in the same header group. Set `PIN_BUZZER = -1` in `Config.h` if no buzzer is fitted.
 
-| Function | GPIO | Wiring |
-|---|---:|---|
-| SSR command | 16 | Through a suitable transistor/opto interface to SSR input |
+## Optional cooling fan: group G
 
-Do not assume every SSR input is directly compatible with 3.3 V. Verify required input voltage and current. Add a defined hardware pull-down so the SSR remains off while the ESP32 is unpowered or resetting.
-
-The firmware is intended for a **zero-cross AC SSR** and uses slow time-proportioned control, not high-frequency PWM.
-
-## Optional outputs
-
-| Function | GPIO | Notes |
-|---|---:|---|
-| Active buzzer | 17 | Drive through a transistor if required |
-| Cooling fan | 18 | Use a MOSFET/relay driver and flyback diode for inductive loads |
-
-## ESP32-S3 pin cautions
-
-- GPIO19 and GPIO20 are commonly used for native USB.
-- GPIO0, GPIO3, GPIO45, and GPIO46 have boot/strapping considerations.
-- The default map avoids those pins.
-- Recheck every pin against the exact ESP32-S3 carrier board, not only the WROOM module datasheet.
+The firmware assigns the cooling-fan driver to GPIO38. Use a MOSFET or relay driver and a flyback diode for an inductive fan or relay coil. Set `PIN_COOLING_FAN = -1` if unused.
