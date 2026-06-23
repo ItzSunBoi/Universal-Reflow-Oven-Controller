@@ -195,7 +195,10 @@ void UiManager::update(uint32_t nowMs) {
                            page_ == Page::RUN_INFO || page_ == Page::MANUAL ||
                            page_ == Page::COMPLETE || page_ == Page::FAULT ||
                            page_ == Page::PID_AUTOTUNE ||
-                           page_ == Page::OTA_UPDATE;
+                           page_ == Page::PID_AUTOTUNE_INFO ||
+                           page_ == Page::OTA_UPDATE ||
+                           page_ == Page::OTA_INFO ||
+                           page_ == Page::FAULT_DETAIL;
   if (!dirty_ && (!dynamicPage ||
                   (nowMs - lastDrawMs_) < UI_REFRESH_INTERVAL_MS)) {
     return;
@@ -243,9 +246,12 @@ void UiManager::handleButton(const ButtonEvent &event, uint32_t nowMs) {
     case Page::LOGS: handleLogs(event); break;
     case Page::SETTINGS: handleSettings(event); break;
     case Page::PID_AUTOTUNE: handlePidAutotune(event, nowMs); break;
+    case Page::PID_AUTOTUNE_INFO: handlePidAutotuneInfo(event); break;
     case Page::OTA_UPDATE: handleOtaUpdate(event, nowMs); break;
+    case Page::OTA_INFO: handleOtaInfo(event); break;
     case Page::ABOUT: handleAbout(event); break;
     case Page::FAULT: handleFault(event); break;
+    case Page::FAULT_DETAIL: handleFaultDetail(event); break;
     case Page::DELETE_CONFIRM: handleDeleteConfirm(event); break;
   }
   dirty_ = true;
@@ -272,7 +278,8 @@ void UiManager::syncPageToRunState() {
 
 bool UiManager::shouldStayFullyLit() const {
   if (ota_.active() || autotuner_.active() ||
-      (page_ == Page::PID_AUTOTUNE && autotuner_.state() != PidAutotuner::State::IDLE)) {
+      ((page_ == Page::PID_AUTOTUNE || page_ == Page::PID_AUTOTUNE_INFO) &&
+       autotuner_.state() != PidAutotuner::State::IDLE)) {
     return true;
   }
   switch (engine_.state()) {
@@ -380,9 +387,12 @@ void UiManager::drawCurrentPage(uint32_t nowMs) {
     case Page::LOGS: drawLogs(); break;
     case Page::SETTINGS: drawSettings(); break;
     case Page::PID_AUTOTUNE: drawPidAutotune(nowMs); break;
+    case Page::PID_AUTOTUNE_INFO: drawPidAutotuneInfo(nowMs); break;
     case Page::OTA_UPDATE: drawOtaUpdate(nowMs); break;
+    case Page::OTA_INFO: drawOtaInfo(nowMs); break;
     case Page::ABOUT: drawAbout(); break;
     case Page::FAULT: drawFault(); break;
+    case Page::FAULT_DETAIL: drawFaultDetail(); break;
     case Page::DELETE_CONFIRM: drawDeleteConfirm(); break;
   }
 
@@ -681,7 +691,8 @@ void UiManager::drawRunGraph(int16_t x, int16_t y, int16_t w, int16_t h) {
 }
 
 void UiManager::drawHome() {
-  const bool ready = sensor_.valid();
+  const bool ready = sensor_.valid() && engine_.state() == RunState::IDLE &&
+                     !autotuner_.active() && !ota_.active();
   drawHeader("REFLOW OVEN", ready ? "READY" : "LOCKED",
              ready ? cGreen_ : cRed_);
 
@@ -711,12 +722,14 @@ void UiManager::drawHome() {
   frame_.setCursor(24, 191);
   frame_.print(detail);
 
-  drawButtons("PROFILE", "START", "MENU");
+  drawButtons("PROFILE", ready ? "START" : "LOCKED", "MENU");
 }
 
 void UiManager::drawProfileList() {
   drawHeader("PROFILES");
-  const uint8_t total = profiles_.profileCount() + 1U;
+  const bool canAddProfile = profiles_.profileCount() < MAX_PROFILES;
+  const uint8_t total = profiles_.profileCount() +
+                        (canAddProfile ? 1U : 0U);
   cursor_ = clampCursor(cursor_, total);
   uint8_t first = 0;
   if (cursor_ >= VISIBLE_PROFILE_ROWS) {
@@ -727,7 +740,7 @@ void UiManager::drawProfileList() {
     const uint8_t index = first + row;
     if (index >= total) break;
     const int16_t y = 44 + row * 52;
-    if (index == profiles_.profileCount()) {
+    if (canAddProfile && index == profiles_.profileCount()) {
       drawListRow(y, "+ Add profile", "Duplicate then edit",
                   index == cursor_, cPurple_);
     } else {
@@ -782,7 +795,9 @@ void UiManager::drawProfileDetail() {
   frame_.setCursor(82, 193);
   frame_.print(line);
 
-  drawButtons("BACK", "EDIT", "START");
+  const bool canStart = sensor_.valid() && engine_.state() == RunState::IDLE &&
+                        !autotuner_.active() && !ota_.active();
+  drawButtons("BACK", "EDIT", canStart ? "START" : "LOCKED");
 }
 
 void UiManager::drawProfileEdit() {
@@ -946,7 +961,9 @@ void UiManager::drawNameEdit() {
   frame_.setTextColor(cYellow_);
   frame_.setCursor(18, 188);
   frame_.print("Hold OK to save name");
-  drawButtons("CHAR-", "NEXT", "CHAR+");
+  const bool atLastNamePosition =
+      nameCursor_ + 1U >= activeNameCapacity() - 1U;
+  drawButtons("CHAR-", atLastNamePosition ? "SAVE" : "NEXT", "CHAR+");
 }
 
 void UiManager::drawRunning(uint32_t nowMs) {
@@ -1066,7 +1083,7 @@ void UiManager::drawComplete() {
   frame_.setTextColor(cYellow_);
   frame_.setCursor(23, 192);
   frame_.print("Do not handle PCB while hot");
-  drawButtons("HOME", "LOG", "REPEAT");
+  drawButtons("HOME", "LOG", sensor_.valid() ? "REPEAT" : "LOCKED");
 }
 
 void UiManager::drawMenu() {
@@ -1104,7 +1121,10 @@ void UiManager::drawManual() {
   snprintf(line, sizeof(line), "Heater output: %.0f%%",
            active ? engine_.heaterDemandPercent() : 0.0f);
   drawCentered(line, 199, 1, cMuted_);
-  drawButtons("-", active ? "OFF" : "ON", "+");
+  const bool canStartManual = sensor_.valid() &&
+                              engine_.state() == RunState::IDLE &&
+                              !autotuner_.active() && !ota_.active();
+  drawButtons("-", active ? "OFF" : (canStartManual ? "ON" : "LOCKED"), "+");
 }
 
 void UiManager::drawCalibration() {
@@ -1113,7 +1133,7 @@ void UiManager::drawCalibration() {
   char value[24];
   snprintf(value, sizeof(value), "%+.1f C", calibrationWorkingC_);
   drawCentered(value, 72, 4, cCyan_);
-  drawCentered("PT100 correction offset", 125, 1, cMuted_);
+  drawCentered("Temperature correction offset", 125, 1, cMuted_);
 
   frame_.setTextSize(1);
   frame_.setTextColor(cYellow_);
@@ -1158,7 +1178,7 @@ void UiManager::drawLogs() {
     frame_.setCursor(22, 171);
     frame_.print(line);
   }
-  drawButtons("BACK", "HOME", "NEXT");
+  drawButtons("BACK", "HOME", count > 1U ? "NEXT" : "NONE");
 }
 
 void UiManager::drawSettings() {
@@ -1223,7 +1243,7 @@ void UiManager::drawSettings() {
     frame_.print(value);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
-  drawButtons("BACK", "SELECT", "DOWN");
+  drawButtons("BACK", "CHANGE", "DOWN");
 }
 
 void UiManager::drawPidAutotune(uint32_t nowMs) {
@@ -1242,7 +1262,9 @@ void UiManager::drawPidAutotune(uint32_t nowMs) {
     drawCentered("Empty oven; close door", 151, 1, cYellow_);
     drawCentered("Heater cycles at bounded power", 170, 1, cMuted_);
     drawCentered("Tune is not saved automatically", 189, 1, cMuted_);
-    drawButtons("-", "START", "+");
+    const bool canStart = sensor_.valid() &&
+                          engine_.state() == RunState::IDLE && !ota_.active();
+    drawButtons("-", canStart ? "START" : "LOCKED", "+");
     return;
   }
 
@@ -1298,7 +1320,92 @@ void UiManager::drawPidAutotune(uint32_t nowMs) {
                static_cast<float>(autotuner_.completedCycles()) /
                    autotuner_.requiredCycles(),
                cGreen_);
-  drawButtons("STOP", "RUNNING", "INFO");
+  drawButtons("STOP", "DETAIL", "INFO");
+}
+
+
+void UiManager::drawPidAutotuneInfo(uint32_t nowMs) {
+  (void)nowMs;
+  const bool diagnostics = pidInfoView_ == PidInfoView::DIAGNOSTICS;
+  drawHeader(diagnostics ? "TUNE DETAILS" : "AUTOTUNE INFO",
+             autotuner_.stateName(),
+             autotuner_.failed() ? cRed_ : cYellow_);
+
+  drawPanel(12, 42, 216, 158, true,
+            diagnostics ? cCyan_ : cPurple_);
+
+  if (diagnostics) {
+    char line[48];
+    const TemperatureReading reading = sensor_.reading();
+
+    frame_.setTextSize(1);
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 53);
+    frame_.print("Actual");
+    snprintf(line, sizeof(line), reading.valid ? "%.1f C" : "INVALID",
+             reading.filteredC);
+    frame_.setTextColor(reading.valid ? cCyan_ : cRed_);
+    frame_.setCursor(114, 53);
+    frame_.print(line);
+
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 76);
+    frame_.print("Target");
+    snprintf(line, sizeof(line), "%.1f C", autotuner_.targetC());
+    frame_.setTextColor(cYellow_);
+    frame_.setCursor(114, 76);
+    frame_.print(line);
+
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 99);
+    frame_.print("Heater demand");
+    snprintf(line, sizeof(line), "%.0f%%", autotuner_.demandPercent());
+    frame_.setTextColor(cOrange_);
+    frame_.setCursor(114, 99);
+    frame_.print(line);
+
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 122);
+    frame_.print("Cycles");
+    snprintf(line, sizeof(line), "%u / %u", autotuner_.completedCycles(),
+             autotuner_.requiredCycles());
+    frame_.setTextColor(cText_);
+    frame_.setCursor(114, 122);
+    frame_.print(line);
+
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 145);
+    frame_.print("Last peak");
+    if (std::isfinite(autotuner_.latestPeakC())) {
+      snprintf(line, sizeof(line), "%.1f C", autotuner_.latestPeakC());
+    } else {
+      strlcpy(line, "Waiting", sizeof(line));
+    }
+    frame_.setTextColor(cText_);
+    frame_.setCursor(114, 145);
+    frame_.print(line);
+
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 168);
+    frame_.print("Last trough");
+    if (std::isfinite(autotuner_.latestTroughC())) {
+      snprintf(line, sizeof(line), "%.1f C", autotuner_.latestTroughC());
+    } else {
+      strlcpy(line, "Waiting", sizeof(line));
+    }
+    frame_.setTextColor(cText_);
+    frame_.setCursor(114, 168);
+    frame_.print(line);
+  } else {
+    drawCentered("Relay-feedback tuning", 54, 2, cPurple_);
+    drawCentered("The heater cycles around", 91, 1, cText_);
+    drawCentered("the selected target.", 108, 1, cText_);
+    drawCentered("Six cycles estimate Kp,", 132, 1, cMuted_);
+    drawCentered("Ki and Kd for this oven.", 149, 1, cMuted_);
+    drawCentered("STOP always forces heater off.", 176, 1, cYellow_);
+  }
+
+  drawButtons("BACK", autotuner_.active() ? "STOP" : "BACK", "NEXT");
 }
 
 void UiManager::drawOtaUpdate(uint32_t nowMs) {
@@ -1307,13 +1414,14 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
 
   if (!ota_.active()) {
     drawPanel(12, 46, 216, 135, true, cBlue_);
-    drawCentered("Local browser", 61, 2, cCyan_);
-    drawCentered("update", 78, 2, cCyan_);
+    drawCentered("Local browser update", 61, 2, cCyan_);
     drawCentered("Wi-Fi is normally disabled", 101, 1, cMuted_);
     drawCentered("START creates a temporary AP", 122, 1, cMuted_);
     drawCentered("Heater remains forced off", 148, 1, cYellow_);
     drawCentered("Session closes after 10 minutes", 169, 1, cMuted_);
-    drawButtons("BACK", "START", "BACK");
+    const bool canStart = engine_.state() == RunState::IDLE &&
+                          !autotuner_.active();
+    drawButtons("BACK", canStart ? "START" : "LOCKED", "BACK");
     return;
   }
 
@@ -1354,21 +1462,45 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
   }
   drawCentered(ota_.detail(), 177, 1,
                ota_.state() == OtaManager::State::ERROR ? cRed_ : cMuted_);
-  drawButtons("STOP", ota_.uploading() ? "UPLOAD" : "READY", "STOP");
+  if (ota_.uploading()) {
+    drawButtons("LOCKED", "UPLOAD", "LOCKED");
+  } else {
+    drawButtons("STOP", "INFO", "STOP");
+  }
+}
+
+
+void UiManager::drawOtaInfo(uint32_t nowMs) {
+  (void)nowMs;
+  drawHeader("OTA HELP", ota_.stateName(), cBlue_);
+  drawPanel(12, 43, 216, 157, true, cBlue_);
+  drawCentered("Upload the application BIN", 56, 2, cCyan_);
+  drawCentered("Use the plain .ino.bin file", 91, 1, cText_);
+  drawCentered("Do not upload ZIP, bootloader,", 112, 1, cMuted_);
+  drawCentered("partitions or merged images.", 129, 1, cMuted_);
+  drawCentered("The heater remains disabled", 157, 1, cYellow_);
+  drawCentered("until the OTA session closes.", 174, 1, cYellow_);
+
+  const bool canStop = ota_.active() && !ota_.uploading();
+  drawButtons("BACK", canStop ? "STOP" : "BACK", "BACK");
 }
 
 void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.9.0", 79, 2, cText_);
+  drawCentered("Controller v1.9.1", 79, 2, cText_);
 
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 113);
   frame_.print("ESP32-S3-WROOM-1-N16");
   frame_.setCursor(22, 132);
+#if USE_NTC_100K_SENSOR
+  frame_.print("ST7789 240x240 + 100k NTC");
+#else
   frame_.print("ST7789 240x240 + MAX31865");
+#endif
   frame_.setCursor(22, 151);
   frame_.print("Profiles stored in NVS flash");
   frame_.setTextColor(cYellow_);
@@ -1389,7 +1521,62 @@ void UiManager::drawFault() {
   frame_.setTextColor(cYellow_);
   frame_.setCursor(22, 187);
   frame_.print("Hold RESET to clear fault");
-  drawButtons("STOPPED", "DETAIL", "HOLD RST");
+  drawButtons("HOME", "DETAIL", "HOLD RST");
+}
+
+
+void UiManager::drawFaultDetail() {
+  drawHeader("FAULT DETAILS", "HEATER OFF", cRed_);
+  drawPanel(12, 42, 216, 159, true, cRed_);
+
+  char line[48];
+  const TemperatureReading reading = sensor_.reading();
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 53);
+  frame_.print("Fault");
+  frame_.setTextColor(cRed_);
+  frame_.setCursor(82, 53);
+  frame_.print(faultCodeName(engine_.faultCode()));
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 76);
+  frame_.print("Detail");
+  frame_.setTextColor(cText_);
+  frame_.setCursor(82, 76);
+  frame_.print(engine_.faultDetail());
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 103);
+  frame_.print("Sensor");
+  frame_.setTextColor(reading.valid ? cGreen_ : cRed_);
+  frame_.setCursor(82, 103);
+  frame_.print(reading.valid ? "VALID" : "INVALID");
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 126);
+  frame_.print("Temperature");
+  if (reading.valid) {
+    snprintf(line, sizeof(line), "%.1f C", reading.filteredC);
+  } else {
+    strlcpy(line, "--.- C", sizeof(line));
+  }
+  frame_.setTextColor(cText_);
+  frame_.setCursor(112, 126);
+  frame_.print(line);
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 149);
+  frame_.print("Heater output");
+  frame_.setTextColor(cGreen_);
+  frame_.setCursor(112, 149);
+  frame_.print(heater_.outputOn() ? "ON" : "OFF");
+
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(22, 177);
+  frame_.print("Reset only after cause is fixed");
+
+  drawButtons("BACK", "HOME", "HOLD RST");
 }
 
 void UiManager::drawDeleteConfirm() {
@@ -1405,7 +1592,9 @@ void UiManager::handleHome(const ButtonEvent &event, uint32_t nowMs) {
   if (isPress(event, ButtonId::LEFT)) {
     cursor_ = profiles_.selectedIndex();
     page_ = Page::PROFILE_LIST;
-  } else if (isPress(event, ButtonId::MIDDLE)) {
+  } else if (isPress(event, ButtonId::MIDDLE) && sensor_.valid() &&
+             engine_.state() == RunState::IDLE && !autotuner_.active() &&
+             !ota_.active()) {
     startSelectedProfile(nowMs);
   } else if (isPress(event, ButtonId::RIGHT)) {
     cursor_ = 0;
@@ -1414,13 +1603,15 @@ void UiManager::handleHome(const ButtonEvent &event, uint32_t nowMs) {
 }
 
 void UiManager::handleProfileList(const ButtonEvent &event) {
-  const uint8_t total = profiles_.profileCount() + 1U;
+  const bool canAddProfile = profiles_.profileCount() < MAX_PROFILES;
+  const uint8_t total = profiles_.profileCount() +
+                        (canAddProfile ? 1U : 0U);
   if (isPress(event, ButtonId::LEFT)) {
     page_ = Page::HOME;
   } else if (isAdjust(event, ButtonId::RIGHT)) {
     cursor_ = static_cast<uint8_t>((cursor_ + 1U) % total);
   } else if (isPress(event, ButtonId::MIDDLE)) {
-    if (cursor_ == profiles_.profileCount()) {
+    if (canAddProfile && cursor_ == profiles_.profileCount()) {
       const int8_t created = profiles_.addDuplicate(profiles_.selectedIndex());
       if (created >= 0) {
         editProfileIndex_ = static_cast<uint8_t>(created);
@@ -1441,7 +1632,9 @@ void UiManager::handleProfileDetail(const ButtonEvent &event,
   } else if (isPress(event, ButtonId::MIDDLE)) {
     editProfileIndex_ = profiles_.selectedIndex();
     beginProfileEdit();
-  } else if (isPress(event, ButtonId::RIGHT)) {
+  } else if (isPress(event, ButtonId::RIGHT) && sensor_.valid() &&
+             engine_.state() == RunState::IDLE && !autotuner_.active() &&
+             !ota_.active()) {
     startSelectedProfile(nowMs);
   }
 }
@@ -1559,6 +1752,16 @@ void UiManager::handleNameEdit(const ButtonEvent &event) {
         buffer[nameCursor_] = ' ';
         buffer[nameCursor_ + 1U] = '\0';
       }
+    } else {
+      char *buffer = activeNameBuffer();
+      int end = static_cast<int>(strlen(buffer)) - 1;
+      while (end > 0 && buffer[end] == ' ') {
+        buffer[end--] = '\0';
+      }
+      if (buffer[0] == '\0') {
+        strlcpy(buffer, "Profile", activeNameCapacity());
+      }
+      page_ = nameReturnPage_;
     }
   } else if (event.button == ButtonId::MIDDLE &&
              event.action == ButtonAction::LONG_PRESS) {
@@ -1650,7 +1853,8 @@ void UiManager::handleManual(const ButtonEvent &event, uint32_t nowMs) {
              event.action == ButtonAction::SHORT_PRESS) {
     if (engine_.state() == RunState::MANUAL) {
       engine_.abortRun();
-    } else if (sensor_.valid()) {
+    } else if (sensor_.valid() && engine_.state() == RunState::IDLE &&
+               !autotuner_.active() && !ota_.active()) {
       engine_.startManual(manualSetpointC_, sensor_.temperatureC(), nowMs);
     }
   } else if (event.button == ButtonId::MIDDLE &&
@@ -1775,6 +1979,12 @@ void UiManager::handlePidAutotune(const ButtonEvent &event,
   if (autotuner_.active()) {
     if (isPress(event, ButtonId::LEFT)) {
       autotuner_.abort("Stopped by user");
+    } else if (isPress(event, ButtonId::MIDDLE)) {
+      pidInfoView_ = PidInfoView::DIAGNOSTICS;
+      page_ = Page::PID_AUTOTUNE_INFO;
+    } else if (isPress(event, ButtonId::RIGHT)) {
+      pidInfoView_ = PidInfoView::HELP;
+      page_ = Page::PID_AUTOTUNE_INFO;
     }
     return;
   }
@@ -1825,6 +2035,22 @@ void UiManager::handlePidAutotune(const ButtonEvent &event,
   }
 }
 
+
+void UiManager::handlePidAutotuneInfo(const ButtonEvent &event) {
+  if (isPress(event, ButtonId::LEFT)) {
+    page_ = Page::PID_AUTOTUNE;
+  } else if (isPress(event, ButtonId::MIDDLE)) {
+    if (autotuner_.active()) {
+      autotuner_.abort("Stopped from info page");
+    }
+    page_ = Page::PID_AUTOTUNE;
+  } else if (isPress(event, ButtonId::RIGHT)) {
+    pidInfoView_ = pidInfoView_ == PidInfoView::DIAGNOSTICS
+                       ? PidInfoView::HELP
+                       : PidInfoView::DIAGNOSTICS;
+  }
+}
+
 void UiManager::handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs) {
   if (!ota_.active()) {
     if (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT)) {
@@ -1841,11 +2067,30 @@ void UiManager::handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs) {
 
   // Uploading is intentionally not interruptible from the buttons because
   // aborting a flash write is more hazardous than allowing it to finish.
-  if (!ota_.uploading() &&
-      (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT))) {
+  if (ota_.uploading()) {
+    return;
+  }
+
+  if (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT)) {
     ota_.stop();
     cursor_ = 8;
     page_ = Page::SETTINGS;
+  } else if (isPress(event, ButtonId::MIDDLE)) {
+    page_ = Page::OTA_INFO;
+  }
+}
+
+void UiManager::handleOtaInfo(const ButtonEvent &event) {
+  if (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT)) {
+    page_ = Page::OTA_UPDATE;
+  } else if (isPress(event, ButtonId::MIDDLE)) {
+    if (ota_.active() && !ota_.uploading()) {
+      ota_.stop();
+      cursor_ = 8;
+      page_ = Page::SETTINGS;
+    } else {
+      page_ = Page::OTA_UPDATE;
+    }
   }
 }
 
@@ -1859,12 +2104,25 @@ void UiManager::handleAbout(const ButtonEvent &event) {
 }
 
 void UiManager::handleFault(const ButtonEvent &event) {
-  if (event.button != ButtonId::RIGHT ||
-      event.action != ButtonAction::LONG_PRESS) {
-    return;
+  if (isPress(event, ButtonId::LEFT)) {
+    page_ = Page::HOME;
+  } else if (isPress(event, ButtonId::MIDDLE)) {
+    page_ = Page::FAULT_DETAIL;
+  } else if (event.button == ButtonId::RIGHT &&
+             event.action == ButtonAction::LONG_PRESS &&
+             engine_.clearFault()) {
+    page_ = Page::HOME;
   }
+}
 
-  if (engine_.clearFault()) {
+void UiManager::handleFaultDetail(const ButtonEvent &event) {
+  if (isPress(event, ButtonId::LEFT)) {
+    page_ = Page::FAULT;
+  } else if (isPress(event, ButtonId::MIDDLE)) {
+    page_ = Page::HOME;
+  } else if (event.button == ButtonId::RIGHT &&
+             event.action == ButtonAction::LONG_PRESS &&
+             engine_.clearFault()) {
     page_ = Page::HOME;
   }
 }

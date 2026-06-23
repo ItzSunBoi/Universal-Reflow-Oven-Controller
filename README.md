@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.9.0
+# Universal Reflow Controller v1.9.1
 
 Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
@@ -10,7 +10,13 @@ Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
 The original dark Ocean UI layout, page order, three-button footer, mode-2 display transport, dirty-tile framebuffer, asynchronous button scanner, PWM backlight, inactivity dimming, and safety interlocks remain intact.
 
-## Changes in v1.9.0
+## Changes in v1.9.1
+
+### Button-function audit and fixes
+
+All page footers and handlers were checked together. The live PID autotune `INFO` button now opens an explanation page, while `DETAIL` opens live diagnostics including target, heater demand, cycles, and the latest peak/trough. The previously inactive fault `DETAIL` and OTA-session center controls are also implemented.
+
+Unavailable actions now display `LOCKED` rather than appearing usable, the profile list no longer offers an add action when all slots are occupied, and the full mapping is documented in `BUTTON_AUDIT.md`.
 
 ### Selectable temperature sensor backend
 
@@ -180,7 +186,7 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 
 ## Main source files
 
-- `UniversalReflowController_v1_9.ino`: initialization and main control loop
+- `UniversalReflowController_v1_9_1.ino`: initialization and main control loop
 - `CslessST7789.*`: mode-2 no-CS display driver
 - `UiManager.*`: UI, themes, centered temperatures, OTA and autotune pages
 - `OtaManager.*`: temporary AP, browser upload, flash update, restart
@@ -191,3 +197,5 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 - `ReflowEngine.*`: stage execution and run logging
 - `ButtonInput.*`: asynchronous button scanner and event queue
 - `partitions.csv`: dual-application OTA partition table
+- `BUTTON_AUDIT.md`: page-by-page three-button behavior matrix
+- `tools/verify_button_contracts.py`: static regression audit for button mappings

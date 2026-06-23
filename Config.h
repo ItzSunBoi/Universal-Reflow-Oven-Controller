@@ -61,8 +61,8 @@ constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 // Initialize using the exact speed proven by the successful ESP32-S3 test,
 // then use a faster but conservative clock for full-screen UI transfers.
-constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
-constexpr uint32_t TFT_SPI_HZ = 40000000UL;
+constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
+constexpr uint32_t TFT_SPI_HZ = 10000000UL;
 
 // -----------------------------------------------------------------------------
 // Temperature sensor backend
@@ -115,11 +115,11 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = -1;  // Dedicated header group B
+constexpr int8_t PIN_BUZZER = 21;  // Dedicated header group B
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = -1;  // Dedicated connector group G
+constexpr int8_t PIN_COOLING_FAN = 38;  // Dedicated connector group G
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;
@@ -173,7 +173,7 @@ constexpr float GLOBAL_MAX_VALID_TEMPERATURE_C = 350.0f;
 constexpr uint8_t MAX_CONSECUTIVE_SENSOR_FAILURES = 3;
 
 constexpr uint8_t MAX_PROFILES = 8;
-constexpr uint8_t MAX_PROFILE_STAGES = 10;
+constexpr uint8_t MAX_PROFILE_STAGES = 7;
 constexpr uint8_t MAX_RUN_LOGS = 8;
 constexpr uint16_t PROFILE_STORE_VERSION = 4;
 

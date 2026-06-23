@@ -1,37 +1,32 @@
-# Validation status
+# Validation notes for v1.9.1
 
-## Completed checks
+## Button contract audit
 
-- All project `.cpp` and `.ino` sources compile and link in the local C++17 Arduino/Adafruit API-shape validation environment.
-- Validation flags: `-Wall -Wextra -Wpedantic`.
-- No compiler warnings were produced.
-- `UiManager` renders to a 240x240 RGB565 framebuffer rather than clearing the physical LCD.
-- Page changes use one complete frame transfer.
-- Stable pages transmit only changed 24x24 tiles.
-- Tile hashing uses one framebuffer rather than two, limiting additional UI RAM use.
-- `CslessST7789::pushImage()` supports cropped, stride-based RGB565 transfers.
-- Button scanning runs in a FreeRTOS task on core 0 with a thread-safe event queue.
-- The Arduino loop retains a cooperative button fallback if task creation fails.
-- The display and MAX31865 remain on separate SPI controllers and physical buses when the MAX31865 backend is selected. NTC mode does not initialize HSPI.
-- NVS profile format remains unchanged, preserving existing profiles and settings.
-- Connector-group isolation remains unchanged.
+The three-button footer and handler logic were reviewed page by page. The automated regression script reports:
 
-## Still required on the physical ESP32-S3
+```text
+Button contract audit PASSED
+Checked 13 behavior contracts and 3 new pages.
+```
 
-1. Compile with the installed Arduino-ESP32 3.x core and current Adafruit libraries.
-2. Confirm startup reports `Button scanner: asynchronous core task` over serial.
-3. Press and release each button repeatedly while changing pages and while the running graph updates.
-4. Verify there is no visible black clear frame during updates.
-5. Observe whether partial tile updates produce any residual tearing at 10 MHz.
-6. If required, test 4 MHz and a 250-500 ms UI refresh interval.
-7. Check free heap after startup because the framebuffer consumes 115,200 bytes.
-8. Complete heater, SSR, sensor, and thermal-safety commissioning with mains isolated first.
+Run it with:
 
-The default thermal profiles and PID values remain starting templates and must be validated for the actual oven and solder paste.
+```bash
+python tools/verify_button_contracts.py
+```
 
+The audit specifically checks the live PID autotune `DETAIL` and `INFO` actions, OTA session controls, fault detail controls, locked heating labels, profile-capacity guard, log navigation guard, and final-position name saving.
 
-## v1.9 sensor backend checks
+## Static C++ checks
 
-- `TemperatureSensor.cpp` was compiled with warnings treated as errors for both `USE_NTC_100K_SENSOR=1` and `USE_NTC_100K_SENSOR=0`.
-- The NTC beta equation and both divider orientations were checked against generated reference points from 25 C through 285 C.
-- The MAX31865 implementation remains present and compile-selectable.
+The modified `UiManager.cpp` and main Arduino sketch were checked using C++17 syntax compilation with warnings promoted to errors against a local Arduino/Adafruit API-shape stub environment:
+
+```text
+-Wall -Wextra -Wpedantic -Werror
+```
+
+The page enum contains 24 pages, and every page has both a draw-switch case and a button-handler switch case.
+
+## Hardware status
+
+The changes have not yet been compiled in the user's exact Arduino-ESP32 3.3.2 environment or tested on the physical panel. The code changes are limited to UI navigation, labels, and information pages; heater, sensor, NVS, OTA partition, and PID control algorithms are unchanged.

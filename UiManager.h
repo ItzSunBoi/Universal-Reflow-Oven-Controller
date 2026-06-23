@@ -44,9 +44,12 @@ class UiManager {
     LOGS,
     SETTINGS,
     PID_AUTOTUNE,
+    PID_AUTOTUNE_INFO,
     OTA_UPDATE,
+    OTA_INFO,
     ABOUT,
     FAULT,
+    FAULT_DETAIL,
     DELETE_CONFIRM,
   };
 
@@ -68,6 +71,11 @@ class UiManager {
     ACTIVE,
     DIMMED,
     OFF,
+  };
+
+  enum class PidInfoView : uint8_t {
+    DIAGNOSTICS,
+    HELP,
   };
 
   CslessST7789 &display_;
@@ -95,6 +103,7 @@ class UiManager {
   float calibrationWorkingC_ = 0.0f;
   float manualSetpointC_ = 120.0f;
   float autotuneTargetC_ = PID_AUTOTUNE_DEFAULT_TARGET_C;
+  PidInfoView pidInfoView_ = PidInfoView::HELP;
 
   bool dirty_ = true;
   bool frameValid_ = false;
@@ -150,9 +159,12 @@ class UiManager {
   void drawLogs();
   void drawSettings();
   void drawPidAutotune(uint32_t nowMs);
+  void drawPidAutotuneInfo(uint32_t nowMs);
   void drawOtaUpdate(uint32_t nowMs);
+  void drawOtaInfo(uint32_t nowMs);
   void drawAbout();
   void drawFault();
+  void drawFaultDetail();
   void drawDeleteConfirm();
 
   void drawHeader(const char *title, const char *status = nullptr,
@@ -191,9 +203,12 @@ class UiManager {
   void handleLogs(const ButtonEvent &event);
   void handleSettings(const ButtonEvent &event);
   void handlePidAutotune(const ButtonEvent &event, uint32_t nowMs);
+  void handlePidAutotuneInfo(const ButtonEvent &event);
   void handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs);
+  void handleOtaInfo(const ButtonEvent &event);
   void handleAbout(const ButtonEvent &event);
   void handleFault(const ButtonEvent &event);
+  void handleFaultDetail(const ButtonEvent &event);
   void handleDeleteConfirm(const ButtonEvent &event);
 
   void beginProfileEdit();
