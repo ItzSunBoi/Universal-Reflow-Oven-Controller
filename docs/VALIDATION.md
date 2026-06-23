@@ -1,30 +1,30 @@
 # Validation status
 
-## Completed off-target checks
+## Completed checks
 
-- All `.cpp`, `.h`, and `.ino` sources were compiled and linked with a local C++17 Arduino/Adafruit API-shape stub.
-- Compiler flags included `-Wall -Wextra -Wpedantic`.
-- The host-side check completed without warnings.
-- The project folder and main `.ino` filename match.
-- The CS-less ST7789 and MAX31865 use separate `SPIClass` objects and separate physical SPI pins.
-- The display has both a software reset GPIO and a software PWM backlight GPIO.
-- All GPIO E-stop references and interrupt code have been removed from the firmware.
-- No active connector group is assigned to more than one module.
-- NVS profile data remains versioned and CRC checked.
-- `SystemSettings` remains 12 bytes, preserving the existing NVS blob layout.
-- Idle dim, screen-off, wake-only first press, and always-lit run/fault states were reviewed in the state flow.
-- A source hash manifest is included in the package.
+- All project `.cpp` and `.ino` sources compile and link in the local C++17 Arduino/Adafruit API-shape validation environment.
+- Validation flags: `-Wall -Wextra -Wpedantic`.
+- No compiler warnings were produced.
+- `UiManager` renders to a 240x240 RGB565 framebuffer rather than clearing the physical LCD.
+- Page changes use one complete frame transfer.
+- Stable pages transmit only changed 24x24 tiles.
+- Tile hashing uses one framebuffer rather than two, limiting additional UI RAM use.
+- `CslessST7789::pushImage()` supports cropped, stride-based RGB565 transfers.
+- Button scanning runs in a FreeRTOS task on core 0 with a thread-safe event queue.
+- The Arduino loop retains a cooperative button fallback if task creation fails.
+- The display and MAX31865 remain on separate SPI controllers and physical buses.
+- NVS profile format remains unchanged, preserving existing profiles and settings.
+- Connector-group isolation remains unchanged.
 
-## Still required on real hardware
+## Still required on the physical ESP32-S3
 
-This package has not been compiled against the user's exact installed Arduino-ESP32 core and library versions, and it has not been exercised on the physical PCB. Before connecting mains power:
+1. Compile with the installed Arduino-ESP32 3.x core and current Adafruit libraries.
+2. Confirm startup reports `Button scanner: asynchronous core task` over serial.
+3. Press and release each button repeatedly while changing pages and while the running graph updates.
+4. Verify there is no visible black clear frame during updates.
+5. Observe whether partial tile updates produce any residual tearing at 10 MHz.
+6. If required, test 4 MHz and a 250-500 ms UI refresh interval.
+7. Check free heap after startup because the framebuffer consumes 115,200 bytes.
+8. Complete heater, SSR, sensor, and thermal-safety commissioning with mains isolated first.
 
-1. compile for `ESP32S3 Dev Module` with 16 MB flash and PSRAM disabled
-2. verify the chosen board definition exposes all configured pins
-3. test display reset, normal brightness, idle dim, screen off, wake behavior, and MAX31865 communication with the heater disconnected
-4. scope the SSR command during boot, reset, upload, and sensor-fault conditions
-5. verify that unplugging or switching off the supply physically removes heater power
-6. calibrate the RTD chain and tune PID values using a sacrificial load
-7. validate actual PCB temperature with an independent attached probe
-
-The default reflow profiles are starting templates, not a substitute for the solder-paste manufacturer's profile or component thermal limits.
+The default thermal profiles and PID values remain starting templates and must be validated for the actual oven and solder paste.

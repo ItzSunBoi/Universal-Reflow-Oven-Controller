@@ -23,6 +23,11 @@ class CslessST7789 : public Adafruit_GFX {
   void setRotation(uint8_t rotation) override;
   void invertDisplay(bool invert) override;
 
+  // Push an RGB565 rectangle from an off-screen framebuffer. `stridePixels`
+  // is the number of pixels between successive source rows.
+  void pushImage(int16_t x, int16_t y, int16_t w, int16_t h,
+                 const uint16_t *pixels, int16_t stridePixels);
+
   void drawPixel(int16_t x, int16_t y, uint16_t color) override;
   void startWrite() override;
   void writePixel(int16_t x, int16_t y, uint16_t color) override;

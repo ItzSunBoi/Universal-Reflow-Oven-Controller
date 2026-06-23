@@ -78,7 +78,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.6");
+  Serial.println("Universal Reflow Controller v1.7");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
@@ -131,6 +131,9 @@ void setup() {
   const bool sensorStarted = temperatureSensor.begin(configuredWireMode());
 
   buttons.begin();
+  Serial.printf("Button scanner: %s\n",
+                buttons.asynchronous() ? "asynchronous core task" :
+                                         "loop fallback");
   ui.begin();
   ui.update(millis());
   backlight.setPercent(profileStore.settings().backlightPercent);
@@ -150,7 +153,10 @@ void setup() {
 void loop() {
   const uint32_t nowMs = millis();
 
-  buttons.update(nowMs);
+  // Normally button scanning runs in a dedicated FreeRTOS task on core 0.
+  // service() is a no-op unless task creation failed, in which case it
+  // provides a cooperative fallback.
+  buttons.service(nowMs);
   ButtonEvent event;
   while (buttons.nextEvent(event)) {
     ui.handleButton(event, nowMs);
@@ -173,6 +179,7 @@ void loop() {
   updateCoolingFan();
   ui.update(nowMs);
 
-  // Cooperative loop: no blocking delays are used in control or UI code.
+  // The loop contains no long delay-based waits. LCD transfers are bounded and
+  // button sampling continues independently on core 0.
   delay(1);
 }

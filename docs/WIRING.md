@@ -95,8 +95,4 @@ The optional fan driver uses GPIO38. Use a MOSFET or relay driver and a flyback 
 
 ## Emergency isolation
 
-No GPIO E-stop is used in this firmware. For an emergency, disconnect the oven from mains power. Arrange the wiring so the accessible plug or switched socket removes power from the heater circuit itself.
-
-## Idle dimming
-
-GPIO13 remains a 20 kHz PWM logic output to the display module's onboard backlight MOSFET. Firmware can reduce or remove backlight drive after inactivity without switching the LCD controller power. The UI remains fully illuminated whenever heating, paused, complete, or faulted.
+No GPIO E-stop is used in v1.7. For an emergency, disconnect the oven from mains power. Arrange the wiring so the accessible plug or switched socket removes power from the heater circuit itself.

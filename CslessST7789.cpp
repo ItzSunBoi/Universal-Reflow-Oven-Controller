@@ -214,6 +214,57 @@ void CslessST7789::writeRepeatedColor(uint16_t color,
   }
 }
 
+
+void CslessST7789::pushImage(int16_t x, int16_t y, int16_t w, int16_t h,
+                             const uint16_t *pixels,
+                             int16_t stridePixels) {
+  if (pixels == nullptr || stridePixels <= 0 || w <= 0 || h <= 0) return;
+
+  if (x < 0) {
+    const int16_t skipped = -x;
+    pixels += skipped;
+    w -= skipped;
+    x = 0;
+  }
+  if (y < 0) {
+    const int16_t skipped = -y;
+    pixels += static_cast<int32_t>(skipped) * stridePixels;
+    h -= skipped;
+    y = 0;
+  }
+  if (x >= _width || y >= _height || w <= 0 || h <= 0) return;
+  if (x + w > _width) w = _width - x;
+  if (y + h > _height) h = _height - y;
+
+  constexpr size_t PIXELS_PER_CHUNK = 96;
+  uint8_t byteBuffer[PIXELS_PER_CHUNK * 2];
+
+  startWrite();
+  setAddressWindow(static_cast<uint16_t>(x), static_cast<uint16_t>(y),
+                   static_cast<uint16_t>(w), static_cast<uint16_t>(h));
+
+  for (int16_t row = 0; row < h; ++row) {
+    const uint16_t *source = pixels + static_cast<int32_t>(row) * stridePixels;
+    int16_t remaining = w;
+    while (remaining > 0) {
+      const int16_t count = remaining < static_cast<int16_t>(PIXELS_PER_CHUNK)
+                                ? remaining
+                                : static_cast<int16_t>(PIXELS_PER_CHUNK);
+      for (int16_t i = 0; i < count; ++i) {
+        const uint16_t color = source[i];
+        byteBuffer[i * 2] = static_cast<uint8_t>(color >> 8);
+        byteBuffer[i * 2 + 1] = static_cast<uint8_t>(color);
+      }
+      spi_.transferBytes(byteBuffer, nullptr,
+                         static_cast<uint32_t>(count) * 2U);
+      source += count;
+      remaining -= count;
+    }
+  }
+
+  endWrite();
+}
+
 void CslessST7789::drawPixel(int16_t x, int16_t y, uint16_t color) {
   if (x < 0 || y < 0 || x >= _width || y >= _height) return;
   startWrite();

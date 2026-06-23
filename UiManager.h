@@ -4,6 +4,7 @@
 
 #include "BacklightController.h"
 #include "CslessST7789.h"
+#include "Config.h"
 #include "ButtonInput.h"
 #include "ProfileStore.h"
 #include "ReflowEngine.h"
@@ -63,7 +64,8 @@ class UiManager {
     OFF,
   };
 
-  CslessST7789 &tft_;
+  CslessST7789 &display_;
+  GFXcanvas16 frame_;
   ProfileStore &profiles_;
   ReflowEngine &engine_;
   TemperatureSensor &sensor_;
@@ -85,6 +87,11 @@ class UiManager {
   float manualSetpointC_ = 120.0f;
 
   bool dirty_ = true;
+  bool frameValid_ = false;
+  bool renderedPageValid_ = false;
+  Page renderedPage_ = Page::HOME;
+  uint32_t tileHashes_[(240 / UI_DIRTY_TILE_SIZE) *
+                       (240 / UI_DIRTY_TILE_SIZE)] = {};
   uint32_t lastDrawMs_ = 0;
   uint32_t buzzerOffMs_ = 0;
   uint32_t lastInteractionMs_ = 0;
@@ -111,6 +118,9 @@ class UiManager {
   bool shouldStayFullyLit() const;
   void restoreConfiguredBacklight();
   void drawCurrentPage(uint32_t nowMs);
+  void flushFrame(bool forceFullFrame);
+  uint32_t hashTile(const uint16_t *buffer, int16_t x, int16_t y,
+                    int16_t w, int16_t h) const;
 
   void drawHome();
   void drawProfileList();

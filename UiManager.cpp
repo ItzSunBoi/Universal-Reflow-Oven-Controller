@@ -7,6 +7,7 @@
 
 namespace {
 constexpr int16_t SCREEN_W = 240;
+constexpr int16_t SCREEN_H = 240;
 constexpr int16_t BUTTON_Y = 215;
 constexpr uint8_t VISIBLE_PROFILE_ROWS = 3;
 constexpr uint8_t VISIBLE_EDIT_ROWS = 5;
@@ -81,23 +82,23 @@ void formatIdleOffDelay(uint8_t minutes, char *buffer, size_t capacity) {
 UiManager::UiManager(CslessST7789 &display, ProfileStore &profiles,
                      ReflowEngine &engine, TemperatureSensor &sensor,
                      BacklightController &backlight)
-    : tft_(display), profiles_(profiles), engine_(engine), sensor_(sensor),
-      backlight_(backlight) {}
+    : display_(display), frame_(240, 240), profiles_(profiles),
+      engine_(engine), sensor_(sensor), backlight_(backlight) {}
 
 void UiManager::begin() {
-  cBg_ = tft_.color565(10, 12, 18);
-  cPanel_ = tft_.color565(22, 27, 38);
-  cPanel2_ = tft_.color565(31, 37, 52);
-  cLine_ = tft_.color565(65, 76, 96);
-  cText_ = tft_.color565(235, 241, 250);
-  cMuted_ = tft_.color565(155, 166, 184);
-  cCyan_ = tft_.color565(74, 211, 238);
-  cGreen_ = tft_.color565(78, 220, 151);
-  cYellow_ = tft_.color565(245, 198, 76);
-  cOrange_ = tft_.color565(255, 143, 79);
-  cRed_ = tft_.color565(245, 92, 96);
-  cPurple_ = tft_.color565(170, 130, 255);
-  cBlue_ = tft_.color565(92, 145, 255);
+  cBg_ = CslessST7789::color565(10, 12, 18);
+  cPanel_ = CslessST7789::color565(22, 27, 38);
+  cPanel2_ = CslessST7789::color565(31, 37, 52);
+  cLine_ = CslessST7789::color565(65, 76, 96);
+  cText_ = CslessST7789::color565(235, 241, 250);
+  cMuted_ = CslessST7789::color565(155, 166, 184);
+  cCyan_ = CslessST7789::color565(74, 211, 238);
+  cGreen_ = CslessST7789::color565(78, 220, 151);
+  cYellow_ = CslessST7789::color565(245, 198, 76);
+  cOrange_ = CslessST7789::color565(255, 143, 79);
+  cRed_ = CslessST7789::color565(245, 92, 96);
+  cPurple_ = CslessST7789::color565(170, 130, 255);
+  cBlue_ = CslessST7789::color565(92, 145, 255);
 
   if (PIN_BUZZER >= 0) {
     pinMode(PIN_BUZZER, OUTPUT);
@@ -285,8 +286,14 @@ bool UiManager::registerInteractionAndWake(uint32_t nowMs) {
 }
 
 void UiManager::drawCurrentPage(uint32_t nowMs) {
-  tft_.fillScreen(cBg_);
-  tft_.setTextWrap(false);
+  const bool pageChanged =
+      !renderedPageValid_ || renderedPage_ != page_ || !frameValid_;
+
+  // Clearing happens only in RAM. The LCD keeps showing the previous complete
+  // frame until changed tiles are ready, eliminating the visible black flash
+  // caused by clearing the physical panel before redrawing its widgets.
+  frame_.fillScreen(cBg_);
+  frame_.setTextWrap(false);
   switch (page_) {
     case Page::HOME: drawHome(); break;
     case Page::PROFILE_LIST: drawProfileList(); break;
@@ -308,25 +315,99 @@ void UiManager::drawCurrentPage(uint32_t nowMs) {
     case Page::FAULT: drawFault(); break;
     case Page::DELETE_CONFIRM: drawDeleteConfirm(); break;
   }
+
+  flushFrame(pageChanged);
+  renderedPage_ = page_;
+  renderedPageValid_ = true;
+}
+
+uint32_t UiManager::hashTile(const uint16_t *buffer, int16_t x, int16_t y,
+                             int16_t w, int16_t h) const {
+  // FNV-1a over RGB565 words. It is inexpensive and lets us avoid transmitting
+  // unchanged regions without retaining a second 115 kB framebuffer.
+  uint32_t hash = 2166136261UL;
+  for (int16_t row = 0; row < h; ++row) {
+    const uint16_t *pixel = buffer + static_cast<int32_t>(y + row) * SCREEN_W + x;
+    for (int16_t column = 0; column < w; ++column) {
+      const uint16_t value = pixel[column];
+      hash ^= static_cast<uint8_t>(value >> 8);
+      hash *= 16777619UL;
+      hash ^= static_cast<uint8_t>(value);
+      hash *= 16777619UL;
+    }
+  }
+  return hash;
+}
+
+void UiManager::flushFrame(bool forceFullFrame) {
+  uint16_t *buffer = frame_.getBuffer();
+  if (buffer == nullptr) {
+    Serial.println("ERROR: UI framebuffer allocation failed");
+    return;
+  }
+
+  constexpr int16_t tileSize = UI_DIRTY_TILE_SIZE;
+  constexpr int16_t tileColumns = SCREEN_W / tileSize;
+  constexpr int16_t tileRows = SCREEN_H / tileSize;
+
+  if (forceFullFrame) {
+    // One uninterrupted transfer replaces the old page without ever exposing
+    // a deliberately cleared LCD frame.
+    display_.pushImage(0, 0, SCREEN_W, SCREEN_H, buffer, SCREEN_W);
+  }
+
+  uint16_t tileIndex = 0;
+  for (int16_t tileY = 0; tileY < tileRows; ++tileY) {
+    const int16_t y = tileY * tileSize;
+    bool changed[tileColumns] = {};
+
+    for (int16_t tileX = 0; tileX < tileColumns; ++tileX, ++tileIndex) {
+      const int16_t x = tileX * tileSize;
+      const uint32_t hash = hashTile(buffer, x, y, tileSize, tileSize);
+      changed[tileX] = !forceFullFrame && frameValid_ &&
+                       tileHashes_[tileIndex] != hash;
+      tileHashes_[tileIndex] = hash;
+    }
+
+    // Merge adjacent dirty tiles into one horizontal transfer. This lowers
+    // command overhead and makes each visible update more coherent.
+    int16_t tileX = 0;
+    while (!forceFullFrame && tileX < tileColumns) {
+      while (tileX < tileColumns && !changed[tileX]) ++tileX;
+      if (tileX >= tileColumns) break;
+
+      const int16_t runStart = tileX;
+      while (tileX < tileColumns && changed[tileX]) ++tileX;
+      const int16_t runTiles = tileX - runStart;
+      const int16_t x = runStart * tileSize;
+      const int16_t width = runTiles * tileSize;
+
+      display_.pushImage(x, y, width, tileSize,
+                         buffer + static_cast<int32_t>(y) * SCREEN_W + x,
+                         SCREEN_W);
+    }
+  }
+
+  frameValid_ = true;
 }
 
 void UiManager::drawHeader(const char *title, const char *status,
                            uint16_t accent) {
-  tft_.fillRoundRect(6, 5, 228, 27, 8, cPanel_);
-  tft_.setTextSize(2);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(14, 11);
-  tft_.print(title);
+  frame_.fillRoundRect(6, 5, 228, 27, 8, cPanel_);
+  frame_.setTextSize(2);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(14, 11);
+  frame_.print(title);
 
   if (status != nullptr) {
-    tft_.setTextSize(1);
+    frame_.setTextSize(1);
     const int16_t width = static_cast<int16_t>(strlen(status) * 6 + 12);
     const int16_t x = 228 - width;
-    tft_.fillRoundRect(x, 10, width, 16, 6,
+    frame_.fillRoundRect(x, 10, width, 16, 6,
                        accent == 0 ? cCyan_ : accent);
-    tft_.setTextColor(cBg_);
-    tft_.setCursor(x + 6, 14);
-    tft_.print(status);
+    frame_.setTextColor(cBg_);
+    frame_.setCursor(x + 6, 14);
+    frame_.print(status);
   }
 }
 
@@ -335,34 +416,34 @@ void UiManager::drawButtons(const char *left, const char *middle,
   const char *labels[3] = {left, middle, right};
   const int16_t xs[3] = {7, 84, 161};
   for (uint8_t i = 0; i < 3; ++i) {
-    tft_.fillRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cPanel2_);
-    tft_.drawRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cLine_);
-    tft_.setTextSize(1);
-    tft_.setTextColor(cText_);
+    frame_.fillRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cPanel2_);
+    frame_.drawRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cLine_);
+    frame_.setTextSize(1);
+    frame_.setTextColor(cText_);
     const int16_t textWidth = static_cast<int16_t>(strlen(labels[i]) * 6);
-    tft_.setCursor(xs[i] + (72 - textWidth) / 2, BUTTON_Y + 6);
-    tft_.print(labels[i]);
+    frame_.setCursor(xs[i] + (72 - textWidth) / 2, BUTTON_Y + 6);
+    frame_.print(labels[i]);
   }
 }
 
 void UiManager::drawPanel(int16_t x, int16_t y, int16_t w, int16_t h,
                           bool selected, uint16_t accent) {
-  tft_.fillRoundRect(x, y, w, h, 9, selected ? cPanel2_ : cPanel_);
-  tft_.drawRoundRect(x, y, w, h, 9,
+  frame_.fillRoundRect(x, y, w, h, 9, selected ? cPanel2_ : cPanel_);
+  frame_.drawRoundRect(x, y, w, h, 9,
                      selected ? (accent == 0 ? cCyan_ : accent) : cLine_);
   if (selected) {
-    tft_.drawRoundRect(x + 1, y + 1, w - 2, h - 2, 8,
+    frame_.drawRoundRect(x + 1, y + 1, w - 2, h - 2, 8,
                        accent == 0 ? cCyan_ : accent);
   }
 }
 
 void UiManager::drawCentered(const char *text, int16_t y, uint8_t size,
                              uint16_t color) {
-  tft_.setTextSize(size);
-  tft_.setTextColor(color);
+  frame_.setTextSize(size);
+  frame_.setTextColor(color);
   const int16_t textWidth = static_cast<int16_t>(strlen(text) * 6 * size);
-  tft_.setCursor((SCREEN_W - textWidth) / 2, y);
-  tft_.print(text);
+  frame_.setCursor((SCREEN_W - textWidth) / 2, y);
+  frame_.print(text);
 }
 
 void UiManager::drawTemperature(float temperatureC, int16_t x, int16_t y,
@@ -374,26 +455,26 @@ void UiManager::drawTemperature(float temperatureC, int16_t x, int16_t y,
     strlcpy(value, "---", sizeof(value));
   }
 
-  tft_.setTextSize(size);
-  tft_.setTextColor(color);
-  tft_.setCursor(x, y);
-  tft_.print(value);
+  frame_.setTextSize(size);
+  frame_.setTextColor(color);
+  frame_.setCursor(x, y);
+  frame_.print(value);
   const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6 * size);
   const int16_t degreeX = x + valueWidth + 2;
-  tft_.drawCircle(degreeX + 2, y + 3, (size / 2U) > 1U ? static_cast<int16_t>(size / 2U) : 1, color);
-  tft_.setTextSize((size / 2U) > 1U ? static_cast<uint8_t>(size / 2U) : 1U);
-  tft_.setCursor(degreeX + 7, y + 2);
-  tft_.print("C");
+  frame_.drawCircle(degreeX + 2, y + 3, (size / 2U) > 1U ? static_cast<int16_t>(size / 2U) : 1, color);
+  frame_.setTextSize((size / 2U) > 1U ? static_cast<uint8_t>(size / 2U) : 1U);
+  frame_.setCursor(degreeX + 7, y + 2);
+  frame_.print("C");
 }
 
 void UiManager::drawProgress(int16_t x, int16_t y, int16_t w, int16_t h,
                              float fraction, uint16_t color) {
   fraction = constrain(fraction, 0.0f, 1.0f);
-  tft_.fillRoundRect(x, y, w, h, h / 2, tft_.color565(18, 22, 31));
-  tft_.drawRoundRect(x, y, w, h, h / 2, cLine_);
+  frame_.fillRoundRect(x, y, w, h, h / 2, CslessST7789::color565(18, 22, 31));
+  frame_.drawRoundRect(x, y, w, h, h / 2, cLine_);
   const int16_t fillWidth = static_cast<int16_t>((w - 2) * fraction);
   if (fillWidth > 2) {
-    tft_.fillRoundRect(x + 1, y + 1, fillWidth, h - 2,
+    frame_.fillRoundRect(x + 1, y + 1, fillWidth, h - 2,
                        ((h - 2) / 2) > 1 ? static_cast<int16_t>((h - 2) / 2) : 1, color);
   }
 }
@@ -402,43 +483,43 @@ void UiManager::drawListRow(int16_t y, const char *primary,
                             const char *secondary, bool selected,
                             uint16_t dotColor) {
   drawPanel(12, y, 216, 44, selected, selected ? cCyan_ : 0);
-  tft_.setTextColor(cText_);
-  tft_.setTextSize(2);
-  tft_.setCursor(24, y + 7);
-  tft_.print(primary);
+  frame_.setTextColor(cText_);
+  frame_.setTextSize(2);
+  frame_.setCursor(24, y + 7);
+  frame_.print(primary);
   if (secondary != nullptr) {
-    tft_.setTextColor(cMuted_);
-    tft_.setTextSize(1);
-    tft_.setCursor(24, y + 29);
-    tft_.print(secondary);
+    frame_.setTextColor(cMuted_);
+    frame_.setTextSize(1);
+    frame_.setCursor(24, y + 29);
+    frame_.print(secondary);
   }
   if (dotColor != 0) {
-    tft_.fillCircle(205, y + 21, 7, dotColor);
+    frame_.fillCircle(205, y + 21, 7, dotColor);
   }
 }
 
 void UiManager::drawScrollIndicator(uint8_t totalItems, uint8_t firstVisible,
                                     uint8_t visibleItems) {
   if (totalItems <= visibleItems || totalItems == 0) return;
-  tft_.fillRoundRect(232, 43, 4, 160, 2, cPanel2_);
+  frame_.fillRoundRect(232, 43, 4, 160, 2, cPanel2_);
   const int16_t thumbHeight = (160 * visibleItems / totalItems) > 16 ? static_cast<int16_t>(160 * visibleItems / totalItems) : 16;
   const int16_t travel = 160 - thumbHeight;
   const int16_t maxFirst = totalItems - visibleItems;
   const int16_t thumbY = 43 + (maxFirst == 0 ? 0 : travel * firstVisible / maxFirst);
-  tft_.fillRoundRect(232, thumbY, 4, thumbHeight, 2, cCyan_);
+  frame_.fillRoundRect(232, thumbY, 4, thumbHeight, 2, cCyan_);
 }
 
 void UiManager::drawProfileGraph(const ReflowProfile &profile, int16_t x,
                                  int16_t y, int16_t w, int16_t h) {
-  tft_.fillRoundRect(x, y, w, h, 8, tft_.color565(13, 16, 23));
-  tft_.drawRoundRect(x, y, w, h, 8, cLine_);
+  frame_.fillRoundRect(x, y, w, h, 8, CslessST7789::color565(13, 16, 23));
+  frame_.drawRoundRect(x, y, w, h, 8, cLine_);
   for (uint8_t i = 1; i < 4; ++i) {
     const int16_t gy = y + i * h / 4;
-    tft_.drawFastHLine(x + 4, gy, w - 8, tft_.color565(35, 42, 56));
+    frame_.drawFastHLine(x + 4, gy, w - 8, CslessST7789::color565(35, 42, 56));
   }
   for (uint8_t i = 1; i < 5; ++i) {
     const int16_t gx = x + i * w / 5;
-    tft_.drawFastVLine(gx, y + 4, h - 8, tft_.color565(35, 42, 56));
+    frame_.drawFastVLine(gx, y + 4, h - 8, CslessST7789::color565(35, 42, 56));
   }
 
   uint32_t totalS = 0;
@@ -465,9 +546,9 @@ void UiManager::drawProfileGraph(const ReflowProfile &profile, int16_t x,
     if (stage.mode == StageMode::HOLD) {
       const int16_t holdStartY = y + h - 8 -
           static_cast<int16_t>(stage.targetC / 270.0f * (h - 16));
-      tft_.drawLine(previousX, holdStartY, nextX, holdStartY, cMuted_);
+      frame_.drawLine(previousX, holdStartY, nextX, holdStartY, cMuted_);
     } else {
-      tft_.drawLine(previousX, previousY, nextX, nextY, cMuted_);
+      frame_.drawLine(previousX, previousY, nextX, nextY, cMuted_);
     }
     previousX = nextX;
     previousY = nextY;
@@ -476,15 +557,15 @@ void UiManager::drawProfileGraph(const ReflowProfile &profile, int16_t x,
 }
 
 void UiManager::drawRunGraph(int16_t x, int16_t y, int16_t w, int16_t h) {
-  tft_.fillRoundRect(x, y, w, h, 8, tft_.color565(13, 16, 23));
-  tft_.drawRoundRect(x, y, w, h, 8, cLine_);
+  frame_.fillRoundRect(x, y, w, h, 8, CslessST7789::color565(13, 16, 23));
+  frame_.drawRoundRect(x, y, w, h, 8, cLine_);
   for (uint8_t i = 1; i < 4; ++i) {
-    tft_.drawFastHLine(x + 4, y + i * h / 4, w - 8,
-                       tft_.color565(35, 42, 56));
+    frame_.drawFastHLine(x + 4, y + i * h / 4, w - 8,
+                       CslessST7789::color565(35, 42, 56));
   }
   for (uint8_t i = 1; i < 5; ++i) {
-    tft_.drawFastVLine(x + i * w / 5, y + 4, h - 8,
-                       tft_.color565(35, 42, 56));
+    frame_.drawFastVLine(x + i * w / 5, y + 4, h - 8,
+                       CslessST7789::color565(35, 42, 56));
   }
 
   const uint16_t count = engine_.historyCount();
@@ -507,9 +588,9 @@ void UiManager::drawRunGraph(int16_t x, int16_t y, int16_t w, int16_t h) {
         constrain(target / maxTemp, 0.0f, 1.0f) * (h - 16));
 
     if (i > 0) {
-      tft_.drawLine(lastTargetX, lastTargetY, px, targetY, cMuted_);
-      tft_.drawLine(lastActualX, lastActualY, px, actualY, cCyan_);
-      tft_.drawLine(lastActualX, lastActualY + 1, px, actualY + 1, cCyan_);
+      frame_.drawLine(lastTargetX, lastTargetY, px, targetY, cMuted_);
+      frame_.drawLine(lastActualX, lastActualY, px, actualY, cCyan_);
+      frame_.drawLine(lastActualX, lastActualY + 1, px, actualY + 1, cCyan_);
     }
     lastActualX = px;
     lastActualY = actualY;
@@ -529,25 +610,25 @@ void UiManager::drawHome() {
   drawCentered("Chamber temperature", 103, 1, cMuted_);
 
   drawPanel(12, 133, 216, 72);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(24, 145);
-  tft_.print("Selected profile");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(24, 145);
+  frame_.print("Selected profile");
 
   const ReflowProfile &profile = profiles_.selectedProfile();
-  tft_.setTextSize(2);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(24, 164);
-  tft_.print(profile.name);
+  frame_.setTextSize(2);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(24, 164);
+  frame_.print(profile.name);
 
   char detail[48];
   snprintf(detail, sizeof(detail), "Peak %.0fC   TAL %us",
            profilePeakTargetC(profile),
            profile.targetTimeAboveLiquidusS);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(24, 191);
-  tft_.print(detail);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(24, 191);
+  frame_.print(detail);
 
   drawButtons("PROFILE", "START", "MENU");
 }
@@ -587,38 +668,38 @@ void UiManager::drawProfileDetail() {
   drawProfileGraph(profile, 12, 42, 216, 90);
 
   char line[48];
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 142);
-  tft_.print("Liquidus");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 142);
+  frame_.print("Liquidus");
   snprintf(line, sizeof(line), "%.0fC", profile.liquidusC);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(82, 142);
-  tft_.print(line);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(82, 142);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 159);
-  tft_.print("Max limit");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 159);
+  frame_.print("Max limit");
   snprintf(line, sizeof(line), "%.0fC", profile.maxTemperatureC);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(82, 159);
-  tft_.print(line);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(82, 159);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 176);
-  tft_.print("Ramp limit");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 176);
+  frame_.print("Ramp limit");
   snprintf(line, sizeof(line), "%.1fC/s", profile.maxRampCPerSecond);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(82, 176);
-  tft_.print(line);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(82, 176);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 193);
-  tft_.print("Stages");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 193);
+  frame_.print("Stages");
   snprintf(line, sizeof(line), "%u", profile.stageCount);
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(82, 193);
-  tft_.print(line);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(82, 193);
+  frame_.print(line);
 
   drawButtons("BACK", "EDIT", "START");
 }
@@ -638,10 +719,10 @@ void UiManager::drawProfileEdit() {
     if (index >= itemCount) break;
     const int16_t y = 44 + row * 32;
     drawPanel(12, y, 216, 27, index == cursor_);
-    tft_.setTextSize(1);
-    tft_.setTextColor(index == cursor_ ? cText_ : cMuted_);
-    tft_.setCursor(23, y + 9);
-    tft_.print(labels[index]);
+    frame_.setTextSize(1);
+    frame_.setTextColor(index == cursor_ ? cText_ : cMuted_);
+    frame_.setCursor(23, y + 9);
+    frame_.print(labels[index]);
 
     char value[32] = "";
     switch (index) {
@@ -655,9 +736,9 @@ void UiManager::drawProfileEdit() {
       case 7: strlcpy(value, "Save", sizeof(value)); break;
     }
     const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6);
-    tft_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
-    tft_.setCursor(216 - valueWidth, y + 9);
-    tft_.print(value);
+    frame_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
+    frame_.setCursor(216 - valueWidth, y + 9);
+    frame_.print(value);
   }
   drawScrollIndicator(itemCount, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "OPEN", "DOWN");
@@ -708,10 +789,10 @@ void UiManager::drawStageEdit() {
     if (index >= itemCount) break;
     const int16_t y = 44 + row * 32;
     drawPanel(12, y, 216, 27, index == cursor_);
-    tft_.setTextSize(1);
-    tft_.setTextColor(index == cursor_ ? cText_ : cMuted_);
-    tft_.setCursor(23, y + 9);
-    tft_.print(labels[index]);
+    frame_.setTextSize(1);
+    frame_.setTextColor(index == cursor_ ? cText_ : cMuted_);
+    frame_.setCursor(23, y + 9);
+    frame_.print(labels[index]);
 
     char value[32] = "";
     switch (index) {
@@ -725,9 +806,9 @@ void UiManager::drawStageEdit() {
       case 7: strlcpy(value, "Done", sizeof(value)); break;
     }
     const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6);
-    tft_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
-    tft_.setCursor(216 - valueWidth, y + 9);
-    tft_.print(value);
+    frame_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
+    frame_.setCursor(216 - valueWidth, y + 9);
+    frame_.print(value);
   }
   drawScrollIndicator(itemCount, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "OPEN", "DOWN");
@@ -774,16 +855,16 @@ void UiManager::drawNameEdit() {
 
   const int16_t charX = 120 - static_cast<int16_t>(strlen(buffer) * 6 * 2) / 2 +
                         nameCursor_ * 12;
-  tft_.drawFastHLine(charX, 98, 10, cPurple_);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 148);
-  tft_.print("Left/right change character");
-  tft_.setCursor(18, 165);
-  tft_.print("OK advances cursor");
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(18, 188);
-  tft_.print("Hold OK to save name");
+  frame_.drawFastHLine(charX, 98, 10, cPurple_);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 148);
+  frame_.print("Left/right change character");
+  frame_.setCursor(18, 165);
+  frame_.print("OK advances cursor");
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(18, 188);
+  frame_.print("Hold OK to save name");
   drawButtons("CHAR-", "NEXT", "CHAR+");
 }
 
@@ -793,18 +874,18 @@ void UiManager::drawRunning(uint32_t nowMs) {
              paused ? cPurple_ : cYellow_);
 
   drawPanel(12, 40, 100, 62);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 48);
-  tft_.print("ACTUAL");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 48);
+  frame_.print("ACTUAL");
   drawTemperature(sensor_.valid() ? sensor_.temperatureC() : NAN,
                   22, 64, 3, cCyan_);
 
   drawPanel(128, 40, 100, 62);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(138, 48);
-  tft_.print("TARGET");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(138, 48);
+  frame_.print("TARGET");
   drawTemperature(engine_.targetTemperatureC(), 138, 64, 3, cYellow_);
 
   drawRunGraph(12, 111, 216, 70);
@@ -815,10 +896,10 @@ void UiManager::drawRunning(uint32_t nowMs) {
   formatTime(engine_.expectedDurationMs() / 1000UL, total, sizeof(total));
   char timeLine[28];
   snprintf(timeLine, sizeof(timeLine), "%s / %s", elapsed, total);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(18, 190);
-  tft_.print(timeLine);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(18, 190);
+  frame_.print(timeLine);
   drawProgress(112, 188, 110, 13, engine_.progress(nowMs), cGreen_);
 
   drawButtons("STOP", paused ? "RESUME" : "PAUSE", "INFO");
@@ -833,53 +914,53 @@ void UiManager::drawRunInfo(uint32_t nowMs) {
 
   drawPanel(12, 43, 216, 151);
   char line[48];
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 54);
-  tft_.print("Profile");
-  tft_.setTextColor(cText_);
-  tft_.setCursor(92, 54);
-  tft_.print(profile.name);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 54);
+  frame_.print("Profile");
+  frame_.setTextColor(cText_);
+  frame_.setCursor(92, 54);
+  frame_.print(profile.name);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 76);
-  tft_.print("Stage mode");
-  tft_.setTextColor(cText_);
-  tft_.setCursor(92, 76);
-  tft_.print(stageModeName(stage.mode));
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 76);
+  frame_.print("Stage mode");
+  frame_.setTextColor(cText_);
+  frame_.setCursor(92, 76);
+  frame_.print(stageModeName(stage.mode));
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 98);
-  tft_.print("Heater");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 98);
+  frame_.print("Heater");
   snprintf(line, sizeof(line), "%.0f%%", engine_.heaterDemandPercent());
-  tft_.setTextColor(cOrange_);
-  tft_.setCursor(92, 98);
-  tft_.print(line);
+  frame_.setTextColor(cOrange_);
+  frame_.setCursor(92, 98);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 120);
-  tft_.print("Peak");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 120);
+  frame_.print("Peak");
   snprintf(line, sizeof(line), "%.1f C", engine_.peakTemperatureC());
-  tft_.setTextColor(cText_);
-  tft_.setCursor(92, 120);
-  tft_.print(line);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(92, 120);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 142);
-  tft_.print("TAL actual");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 142);
+  frame_.print("TAL actual");
   snprintf(line, sizeof(line), "%lus",
            static_cast<unsigned long>(engine_.timeAboveLiquidusMs() / 1000UL));
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(92, 142);
-  tft_.print(line);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(92, 142);
+  frame_.print(line);
 
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 164);
-  tft_.print("Elapsed");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 164);
+  frame_.print("Elapsed");
   formatTime(engine_.runElapsedMs(nowMs) / 1000UL, line, sizeof(line));
-  tft_.setTextColor(cText_);
-  tft_.setCursor(92, 164);
-  tft_.print(line);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(92, 164);
+  frame_.print(line);
 
   drawButtons("BACK", engine_.state() == RunState::PAUSED ? "RESUME" : "PAUSE",
               "GRAPH");
@@ -893,17 +974,17 @@ void UiManager::drawComplete() {
 
   char line[48];
   snprintf(line, sizeof(line), "Peak: %.1f C", engine_.peakTemperatureC());
-  tft_.setTextSize(1);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(23, 153);
-  tft_.print(line);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(23, 153);
+  frame_.print(line);
   snprintf(line, sizeof(line), "Time above liquidus: %lus",
            static_cast<unsigned long>(engine_.timeAboveLiquidusMs() / 1000UL));
-  tft_.setCursor(23, 172);
-  tft_.print(line);
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(23, 192);
-  tft_.print("Do not handle PCB while hot");
+  frame_.setCursor(23, 172);
+  frame_.print(line);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(23, 192);
+  frame_.print("Do not handle PCB while hot");
   drawButtons("HOME", "LOG", "REPEAT");
 }
 
@@ -916,10 +997,10 @@ void UiManager::drawMenu() {
   for (uint8_t i = 0; i < count; ++i) {
     const int16_t y = 44 + i * 32;
     drawPanel(16, y, 208, 27, i == cursor_);
-    tft_.setTextSize(1);
-    tft_.setTextColor(cText_);
-    tft_.setCursor(28, y + 9);
-    tft_.print(items[i]);
+    frame_.setTextSize(1);
+    frame_.setTextColor(cText_);
+    frame_.setCursor(28, y + 9);
+    frame_.print(items[i]);
   }
   drawButtons("BACK", "OPEN", "DOWN");
 }
@@ -935,18 +1016,18 @@ void UiManager::drawManual() {
   char line[48];
   snprintf(line, sizeof(line), "Actual: %.1f C",
            sensor_.valid() ? sensor_.temperatureC() : NAN);
-  tft_.setTextSize(1);
-  tft_.setTextColor(cText_);
-  tft_.setCursor(20, 145);
-  tft_.print(line);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cText_);
+  frame_.setCursor(20, 145);
+  frame_.print(line);
   drawProgress(20, 166, 200, 15,
                active ? engine_.heaterDemandPercent() / 100.0f : 0.0f,
                cRed_);
   snprintf(line, sizeof(line), "Heater output: %.0f%%",
            active ? engine_.heaterDemandPercent() : 0.0f);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(20, 190);
-  tft_.print(line);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(20, 190);
+  frame_.print(line);
   drawButtons("-", active ? "OFF" : "ON", "+");
 }
 
@@ -958,13 +1039,13 @@ void UiManager::drawCalibration() {
   drawCentered(value, 72, 4, cCyan_);
   drawCentered("PT100 correction offset", 125, 1, cMuted_);
 
-  tft_.setTextSize(1);
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(18, 169);
-  tft_.print("Calibrate against a trusted probe");
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(18, 188);
-  tft_.print("Adjustment step: 0.1 C");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(18, 169);
+  frame_.print("Calibrate against a trusted probe");
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(18, 188);
+  frame_.print("Adjustment step: 0.1 C");
   drawButtons("-", "SAVE", "+");
 }
 
@@ -979,27 +1060,27 @@ void UiManager::drawLogs() {
     logCursor_ = clampCursor(logCursor_, count);
     const RunSummary &log = profiles_.runLogNewest(logCursor_);
     drawPanel(12, 43, 216, 154);
-    tft_.setTextSize(2);
-    tft_.setTextColor(cText_);
-    tft_.setCursor(22, 54);
-    tft_.print(log.profileName);
+    frame_.setTextSize(2);
+    frame_.setTextColor(cText_);
+    frame_.setCursor(22, 54);
+    frame_.print(log.profileName);
 
     char line[48];
     snprintf(line, sizeof(line), "Peak %.1f C", log.peakTemperatureC);
-    tft_.setTextSize(1);
-    tft_.setTextColor(cCyan_);
-    tft_.setCursor(22, 89);
-    tft_.print(line);
+    frame_.setTextSize(1);
+    frame_.setTextColor(cCyan_);
+    frame_.setCursor(22, 89);
+    frame_.print(line);
     snprintf(line, sizeof(line), "TAL %us", log.timeAboveLiquidusS);
-    tft_.setCursor(22, 111);
-    tft_.print(line);
+    frame_.setCursor(22, 111);
+    frame_.print(line);
     snprintf(line, sizeof(line), "Total %us", log.totalTimeS);
-    tft_.setCursor(22, 133);
-    tft_.print(line);
+    frame_.setCursor(22, 133);
+    frame_.print(line);
     snprintf(line, sizeof(line), "Log %u of %u", logCursor_ + 1U, count);
-    tft_.setTextColor(cMuted_);
-    tft_.setCursor(22, 171);
-    tft_.print(line);
+    frame_.setTextColor(cMuted_);
+    frame_.setCursor(22, 171);
+    frame_.print(line);
   }
   drawButtons("BACK", "HOME", "NEXT");
 }
@@ -1019,10 +1100,10 @@ void UiManager::drawSettings() {
     if (i >= count) break;
     const int16_t y = 44 + row * 32;
     drawPanel(16, y, 208, 27, i == cursor_);
-    tft_.setTextSize(1);
-    tft_.setTextColor(cText_);
-    tft_.setCursor(28, y + 9);
-    tft_.print(items[i]);
+    frame_.setTextSize(1);
+    frame_.setTextColor(cText_);
+    frame_.setCursor(28, y + 9);
+    frame_.print(items[i]);
 
     char value[16] = "";
     if (i == 0) {
@@ -1052,9 +1133,9 @@ void UiManager::drawSettings() {
     if (i == 6) strlcpy(value, "RESTORE", sizeof(value));
     if (i == 7) strlcpy(value, "OPEN", sizeof(value));
     if (i == 8) strlcpy(value, "DONE", sizeof(value));
-    tft_.setTextColor(i == 6 ? cRed_ : (i == 8 ? cGreen_ : cMuted_));
-    tft_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
-    tft_.print(value);
+    frame_.setTextColor(i == 6 ? cRed_ : (i == 8 ? cGreen_ : cMuted_));
+    frame_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
+    frame_.print(value);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "CHANGE", "DOWN");
@@ -1064,34 +1145,34 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.6", 79, 2, cText_);
+  drawCentered("Controller v1.7", 79, 2, cText_);
 
-  tft_.setTextSize(1);
-  tft_.setTextColor(cMuted_);
-  tft_.setCursor(22, 113);
-  tft_.print("ESP32-S3-WROOM-1-N16");
-  tft_.setCursor(22, 132);
-  tft_.print("ST7789 240x240 + MAX31865");
-  tft_.setCursor(22, 151);
-  tft_.print("Profiles stored in NVS flash");
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(22, 178);
-  tft_.print("Use a thermal fuse and enclosure");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 113);
+  frame_.print("ESP32-S3-WROOM-1-N16");
+  frame_.setCursor(22, 132);
+  frame_.print("ST7789 240x240 + MAX31865");
+  frame_.setCursor(22, 151);
+  frame_.print("Profiles stored in NVS flash");
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(22, 178);
+  frame_.print("Use a thermal fuse and enclosure");
   drawButtons("BACK", "HOME", "BACK");
 }
 
 void UiManager::drawFault() {
   drawHeader("FAULT", "STOP", cRed_);
-  tft_.fillRoundRect(12, 45, 216, 129, 14, tft_.color565(45, 20, 26));
-  tft_.drawRoundRect(12, 45, 216, 129, 14, cRed_);
+  frame_.fillRoundRect(12, 45, 216, 129, 14, CslessST7789::color565(45, 20, 26));
+  frame_.drawRoundRect(12, 45, 216, 129, 14, cRed_);
   drawCentered("!", 55, 6, cRed_);
   drawCentered(faultCodeName(engine_.faultCode()), 117, 1, cText_);
   drawCentered(engine_.faultDetail(), 139, 1, cMuted_);
 
-  tft_.setTextSize(1);
-  tft_.setTextColor(cYellow_);
-  tft_.setCursor(22, 187);
-  tft_.print("Hold RESET to clear fault");
+  frame_.setTextSize(1);
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(22, 187);
+  frame_.print("Hold RESET to clear fault");
   drawButtons("STOPPED", "DETAIL", "HOLD RST");
 }
 

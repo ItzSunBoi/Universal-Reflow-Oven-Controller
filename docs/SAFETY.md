@@ -21,12 +21,12 @@ This firmware controls a heating appliance and cannot make an unsafe mains desig
 - Per-profile temperature ceiling.
 - Heater-response monitor.
 - Conservative temperature-rise-while-off monitor.
-- No blocking delays in the control loop.
+- No explicit delay-based waits in the control loop; display transfers are minimized through dirty-tile updates.
 - CRC-checked NVS profile database.
 
 ## Emergency behavior
 
-Version 1.4 intentionally has no GPIO emergency-stop input. The normal UI STOP action commands the SSR off, but emergency isolation is performed by unplugging the oven or switching off the outlet supplying the heater.
+Version 1.7 intentionally has no GPIO emergency-stop input. The normal UI STOP action commands the SSR off, but emergency isolation is performed by unplugging the oven or switching off the outlet supplying the heater.
 
 This only works as intended when the accessible disconnect removes power from the heater circuit. A separate controller supply must not leave the heater energized through another path.
 

@@ -61,8 +61,8 @@ constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 // Initialize using the exact speed proven by the successful ESP32-S3 test,
 // then use a faster but conservative clock for full-screen UI transfers.
-constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
-constexpr uint32_t TFT_SPI_HZ = 10000000UL;
+constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
+constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
 // MAX31865 bus (HSPI).
 constexpr int8_t PIN_MAX31865_CLK = 8;   // Connector group E
@@ -71,8 +71,8 @@ constexpr int8_t PIN_MAX31865_SDI = 18;  // ESP32 MOSI -> MAX31865; group E
 constexpr int8_t PIN_MAX31865_CS  = 40;  // Connector group E
 constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
 constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
-constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
-constexpr uint8_t RTD_WIRE_COUNT = 3;         // 2, 3, or 4
+constexpr float RTD_REFERENCE_OHMS = 4300.0f;  // Confirm fitted reference resistor
+constexpr uint8_t RTD_WIRE_COUNT = 2;         // 2, 3, or 4
 constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 
 // User controls. Buttons connect the GPIO to GND when pressed.
@@ -85,16 +85,28 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = 21;  // Dedicated header group B
+constexpr int8_t PIN_BUZZER = -1;  // Dedicated header group B
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = 38;  // Dedicated connector group G
+constexpr int8_t PIN_COOLING_FAN = -1;  // Dedicated connector group G
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;
 constexpr uint32_t SENSOR_SAMPLE_INTERVAL_MS = 250;
 constexpr uint32_t UI_REFRESH_INTERVAL_MS = 200;
+
+// UI rendering uses a 16-bit off-screen framebuffer and only transfers tiles
+// whose pixel content changed. 24 px divides the 240x240 panel exactly.
+constexpr uint8_t UI_DIRTY_TILE_SIZE = 24;
+
+// Buttons are scanned independently from the Arduino loop on the other ESP32-S3
+// core, so a long display transfer cannot hide a press.
+constexpr uint32_t BUTTON_SCAN_INTERVAL_MS = 2;
+constexpr uint16_t BUTTON_EVENT_QUEUE_LENGTH = 32;
+constexpr uint16_t BUTTON_TASK_STACK_BYTES = 3072;
+constexpr uint8_t BUTTON_TASK_PRIORITY = 2;
+constexpr int8_t BUTTON_TASK_CORE = 0;
 constexpr uint32_t SSR_WINDOW_MS = 2000;
 constexpr uint32_t SSR_MIN_PULSE_MS = 100;
 constexpr float GLOBAL_MAX_TEMPERATURE_C = 285.0f;
@@ -103,7 +115,7 @@ constexpr float GLOBAL_MAX_VALID_TEMPERATURE_C = 350.0f;
 constexpr uint8_t MAX_CONSECUTIVE_SENSOR_FAILURES = 3;
 
 constexpr uint8_t MAX_PROFILES = 8;
-constexpr uint8_t MAX_PROFILE_STAGES = 7;
+constexpr uint8_t MAX_PROFILE_STAGES = 10;
 constexpr uint8_t MAX_RUN_LOGS = 8;
 constexpr uint16_t PROFILE_STORE_VERSION = 3;
 
@@ -136,3 +148,7 @@ static_assert(PIN_TFT_SCK != PIN_MAX31865_CLK,
               "CS-less TFT and MAX31865 must use separate clock pins");
 static_assert(PIN_TFT_MOSI != PIN_MAX31865_SDI,
               "CS-less TFT and MAX31865 must use separate data pins");
+static_assert(UI_DIRTY_TILE_SIZE > 0 && (240 % UI_DIRTY_TILE_SIZE) == 0,
+              "UI dirty tile size must divide the 240-pixel panel");
+static_assert(BUTTON_EVENT_QUEUE_LENGTH >= 8,
+              "Button event queue is too small for long display updates");
