@@ -34,8 +34,17 @@ struct SystemSettings {
   bool buzzerEnabled;
   bool fanDuringCool;
   uint8_t backlightPercent;
-  uint8_t reserved[4];
+
+  // These fields reuse the four bytes reserved by earlier firmware, keeping
+  // the NVS database layout compatible with existing profiles and run logs.
+  uint8_t idleDimSeconds;
+  uint8_t idleOffMinutes;
+  uint8_t idleDimPercent;
+  uint8_t reserved;
 };
+
+static_assert(sizeof(SystemSettings) == 12,
+              "SystemSettings layout changed; NVS migration is required");
 
 struct RunSummary {
   uint32_t sequence;

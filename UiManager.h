@@ -57,6 +57,12 @@ class UiManager {
     STAGE,
   };
 
+  enum class BacklightState : uint8_t {
+    ACTIVE,
+    DIMMED,
+    OFF,
+  };
+
   CslessST7789 &tft_;
   ProfileStore &profiles_;
   ReflowEngine &engine_;
@@ -81,6 +87,9 @@ class UiManager {
   bool dirty_ = true;
   uint32_t lastDrawMs_ = 0;
   uint32_t buzzerOffMs_ = 0;
+  uint32_t lastInteractionMs_ = 0;
+  uint32_t wakeEventGuardUntilMs_ = 0;
+  BacklightState backlightState_ = BacklightState::ACTIVE;
 
   uint16_t cBg_;
   uint16_t cPanel_;
@@ -97,6 +106,10 @@ class UiManager {
   uint16_t cBlue_;
 
   void syncPageToRunState();
+  void updateIdleBacklight(uint32_t nowMs);
+  bool registerInteractionAndWake(uint32_t nowMs);
+  bool shouldStayFullyLit() const;
+  void restoreConfiguredBacklight();
   void drawCurrentPage(uint32_t nowMs);
 
   void drawHome();

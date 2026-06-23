@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.5
+# Universal Reflow Controller v1.6
 
 Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 CS-less ST7789 display, a MAX31865/PT100 temperature interface, three UI buttons, software-controlled display backlight, and a zero-cross AC SSR.
 
@@ -16,9 +16,7 @@ The display occupies groups **A and D**, the MAX31865 occupies **E**, the button
 ## Implemented features
 
 - Independent hardware SPI controllers for the CS-less ST7789 and MAX31865.
-- Custom CS-less ST7789 transport using the hardware-proven SPI mode 2 sequence.
-- Exact panel initialization: SWRESET, SLPOUT, COLMOD 0x05, MADCTL, INVON, NORON, DISPON.
-- Software PWM backlight control with persistent brightness setting.
+- Software PWM backlight control with persistent brightness, idle-dim, screen-off, and dim-level settings.
 - Software-controlled TFT reset.
 - 240x240 UI pages for home, profiles, profile details, running graph, run details, completion, profile editor, stage editor, profile naming, menu, manual heat, calibration, logs, settings, about, and faults.
 - Up to 8 profiles in ESP32 NVS flash.
@@ -45,10 +43,6 @@ Install through **Arduino IDE > Library Manager**:
 2. Adafruit MAX31865 library
 3. Adafruit BusIO
 
-The Adafruit ST7735/ST7789 library is no longer required. `CslessST7789.*`
-implements the known-working no-CS panel protocol while inheriting the drawing
-API from Adafruit GFX.
-
 The ESP32 `Preferences` and `SPI` libraries are included with the Espressif Arduino core.
 
 ## Arduino IDE settings
@@ -60,7 +54,7 @@ The ESP32 `Preferences` and `SPI` libraries are included with the Espressif Ardu
 - USB CDC On Boot: choose according to your programming connection
 - Partition scheme: any 16 MB scheme retaining the normal NVS partition
 
-Open `UniversalReflowController_v1_5.ino` from a folder named `UniversalReflowController_v1_5`.
+Open `UniversalReflowController_v1_6.ino` from a folder named `UniversalReflowController_v1_6`.
 
 ## Configuration
 
@@ -73,8 +67,6 @@ constexpr float RTD_REFERENCE_OHMS = 430.0f;
 constexpr uint8_t RTD_WIRE_COUNT = 3;
 constexpr bool SSR_ACTIVE_HIGH = true;
 constexpr bool TFT_INVERT_COLORS = true;
-constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
-constexpr uint32_t TFT_SPI_HZ = 10000000UL;
 ```
 
 Check the actual reference resistor fitted to the MAX31865 board. PT100 boards commonly use approximately 430 ohms; PT1000 boards require a different value and `RTD_NOMINAL_OHMS` must also be changed.
@@ -91,24 +83,6 @@ Check the actual reference resistor fitted to the MAX31865 board. PT100 boards c
 
 Hold the middle button on the manual page to stop heating and return to the menu. Hold the middle button in the name editor to save the name. Hold the right button on a fault page to reset after the fault condition has cleared.
 
-## Display transport
-
-The seven-pin display has no exposed CS and is permanently selected. It uses a
-dedicated FSPI bus and the exact settings proven on the physical module:
-
-```text
-SPI mode: 2 (CPOL=1, CPHA=0)
-Initialization speed: 1 MHz
-UI drawing speed: 10 MHz
-Pixel format command: COLMOD 0x05
-Panel sequence: SWRESET → SLPOUT → MADCTL → INVON → NORON → DISPON
-```
-
-The controller always initializes the panel at the proven 1 MHz. UI drawing
-then switches to 10 MHz so full-screen redraws do not stall the thermal-control
-loop. If corruption appears, reduce `TFT_SPI_HZ` to 4 MHz or 1 MHz. Once stable,
-20 MHz and 31.25 MHz may be tested.
-
 ## Backlight behavior
 
 - GPIO13 drives the module's `BLK` MOSFET input.
@@ -117,6 +91,14 @@ loop. If corruption appears, reduce `TFT_SPI_HZ` to 4 MHz or 1 MHz. Once stable,
 - Default brightness: 80%.
 - Adjustable range: 10% to 100%.
 - Brightness is stored in NVS.
+- Default idle dim: 20% after 60 seconds.
+- Default screen off: after 10 minutes.
+- Idle dim delay choices: 30 s, 60 s, 120 s, or disabled.
+- Screen-off delay choices: 5 min, 10 min, 30 min, or disabled.
+- Dim-level choices: 10%, 20%, 30%, or 40%.
+- Any button restores full brightness immediately.
+- When fully off, the first button event only wakes the display, preventing an unseen press from starting a profile.
+- The display remains fully lit during running, paused, manual heating, completion, and fault states.
 - The backlight remains off while the display initializes.
 
 ## Control tuning
@@ -165,8 +147,7 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 
 ## Files
 
-- `UniversalReflowController_v1_5.ino`: setup and cooperative main loop
-- `CslessST7789.*`: hardware-proven no-CS, SPI-mode-2 ST7789 GFX driver
+- `UniversalReflowController_v1_6.ino`: setup and cooperative main loop
 - `Config.h`: pin mapping and hardware constants
 - `Types.h`: profile, stage, fault, settings, and log structures
 - `Safety.*`: startup SSR inhibit and immediate software hard-off helper
@@ -176,7 +157,8 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 - `ProfileStore.*`: NVS profile/settings/log persistence with CRC
 - `ButtonInput.*`: debounce, short press, long press, and repeat events
 - `BacklightController.*`: LEDC PWM control for the TFT `BLK` input
-- `UiManager.*`: complete 240x240 interface and editors
+- `CslessST7789.*`: proven no-CS SPI-mode-2 display transport
+- `UiManager.*`: complete 240x240 interface, editors, and inactivity policy
 - `WIRING.md`: detailed connector map and wiring notes
 - `SAFETY.md`: hardware safety requirements
 - `ARCHITECTURE.md`: module, state-machine, storage, and UI design

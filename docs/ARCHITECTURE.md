@@ -10,7 +10,8 @@ The firmware deliberately keeps the main control path non-blocking:
 4. persist any completed run summary
 5. update SSR time-proportioning output
 6. update the optional cooling fan
-7. redraw the current UI page when required
+7. update the idle dim/off backlight state
+8. redraw the current UI page when required
 
 Before this loop begins, `Safety` forces the SSR command inactive and holds a startup inhibit until all peripherals have initialized.
 
@@ -23,8 +24,7 @@ Before this loop begins, `Safety` forces the SSR command inactive and holds a st
 - `ReflowEngine`: ramp/hold/cool state machine, live graph history, run metrics, and thermal safety checks.
 - `ProfileStore`: CRC-protected NVS database for profiles, settings, and run summaries.
 - `BacklightController`: LEDC PWM output for the display module's `BLK` MOSFET input.
-- `CslessST7789`: dedicated no-CS ST7789 transport using SPI mode 2 and the proven command sequence, exposed as an Adafruit GFX-compatible display.
-- `UiManager`: all 240x240 pages and three-button editors.
+- `UiManager`: all 240x240 pages, three-button editors, and the inactivity state machine.
 
 ## Profile execution
 
@@ -45,6 +45,7 @@ The database contains:
 - up to 8 profiles
 - selected-profile index
 - calibration and UI settings
+- normal brightness, idle-dim delay, screen-off delay, and dim brightness
 - the newest 8 run summaries
 
 A schema version mismatch or CRC failure restores the compiled factory profiles.
@@ -63,7 +64,7 @@ A schema version mismatch or CRC failure restores the compiled factory profiles.
 - fixed bottom row of three button legends
 - original home, profile, running, complete, menu, manual, and fault page ordering
 
-## Carrier connector isolation in v1.5
+## Carrier connector isolation
 
 The physical pin map is organized around the reused carrier PCB rather than conventional dev-board header order.
 
@@ -75,26 +76,16 @@ The physical pin map is organized around the reused carrier PCB rather than conv
 
 No connector group is shared by different modules. The display is permitted to span two groups so it can retain both software reset and software PWM backlight control.
 
+## Backlight inactivity state machine
 
-## Display protocol
+The UI owns a three-state backlight policy:
 
-The display controller is permanently selected because the module exposes no
-CS pin. The firmware therefore gives it a dedicated FSPI controller and never
-toggles a synthetic CS. The physical module was confirmed to require CPOL=1,
-CPHA=0 (`SPI_MODE2`) on the ESP32-S3. Initialization runs at the proven 1 MHz;
-after `DISPON`, normal UI drawing switches to 10 MHz so screen refreshes do not
-dominate the control loop. Initialization deliberately follows the
-working MicroPython implementation:
+- **ACTIVE:** configured normal brightness
+- **DIMMED:** configured idle brightness after the dim timeout
+- **OFF:** zero PWM duty after the screen-off timeout
 
-1. active-low hardware reset
-2. `SWRESET` and 150 ms delay
-3. `SLPOUT`
-4. `COLMOD = 0x05`
-5. rotation-specific `MADCTL` and 240x240 RAM offsets
-6. `INVON`
-7. `NORON`
-8. `DISPON`
+Any button resets the inactivity timer. A press while dimmed restores normal brightness and continues with the requested UI action. A press while fully off restores the display but consumes that first event, avoiding accidental profile starts or setting changes while the screen was invisible.
 
-The custom class inherits `Adafruit_GFX`; therefore `UiManager` retains the
-approved drawing and layout implementation without depending on Adafruit's
-ST7789 transport layer.
+Running, paused, manual heating, completion, and fault states force the backlight to remain at normal brightness. When the backlight is fully off on an idle page, UI redraws are suspended to avoid wasting SPI bandwidth.
+
+The three inactivity settings reuse bytes reserved in the v1.5 NVS structure, so the database size and schema version remain unchanged. Existing profiles and logs are migrated in place by initializing zero-valued reserved bytes to the new defaults.

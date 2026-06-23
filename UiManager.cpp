@@ -33,6 +33,49 @@ float profilePeakTargetC(const ReflowProfile &profile) {
   }
   return peakC;
 }
+
+uint8_t nextIdleDimSeconds(uint8_t current) {
+  switch (current) {
+    case 30U: return 60U;
+    case 60U: return 120U;
+    case 120U: return TFT_IDLE_TIMEOUT_DISABLED;
+    default: return 30U;
+  }
+}
+
+uint8_t nextIdleOffMinutes(uint8_t current) {
+  switch (current) {
+    case 5U: return 10U;
+    case 10U: return 30U;
+    case 30U: return TFT_IDLE_TIMEOUT_DISABLED;
+    default: return 5U;
+  }
+}
+
+uint8_t nextIdleDimPercent(uint8_t current) {
+  switch (current) {
+    case 10U: return 20U;
+    case 20U: return 30U;
+    case 30U: return 40U;
+    default: return 10U;
+  }
+}
+
+void formatIdleDimDelay(uint8_t seconds, char *buffer, size_t capacity) {
+  if (seconds == TFT_IDLE_TIMEOUT_DISABLED) {
+    strlcpy(buffer, "OFF", capacity);
+  } else {
+    snprintf(buffer, capacity, "%us", seconds);
+  }
+}
+
+void formatIdleOffDelay(uint8_t minutes, char *buffer, size_t capacity) {
+  if (minutes == TFT_IDLE_TIMEOUT_DISABLED) {
+    strlcpy(buffer, "OFF", capacity);
+  } else {
+    snprintf(buffer, capacity, "%um", minutes);
+  }
+}
 }  // namespace
 
 UiManager::UiManager(CslessST7789 &display, ProfileStore &profiles,
@@ -64,6 +107,9 @@ void UiManager::begin() {
   calibrationWorkingC_ = profiles_.settings().temperatureOffsetC;
   manualSetpointC_ = 120.0f;
   cursor_ = profiles_.selectedIndex();
+  lastInteractionMs_ = millis();
+  wakeEventGuardUntilMs_ = 0;
+  backlightState_ = BacklightState::ACTIVE;
   dirty_ = true;
 }
 
@@ -75,6 +121,14 @@ void UiManager::update(uint32_t nowMs) {
   }
 
   syncPageToRunState();
+  updateIdleBacklight(nowMs);
+
+  // Do not spend SPI bandwidth redrawing an invisible idle screen. A wake
+  // event marks the page dirty so it is rendered immediately after restoring
+  // the configured brightness.
+  if (backlightState_ == BacklightState::OFF && !shouldStayFullyLit()) {
+    return;
+  }
 
   const bool dynamicPage = page_ == Page::HOME || page_ == Page::RUNNING ||
                            page_ == Page::RUN_INFO || page_ == Page::MANUAL ||
@@ -90,6 +144,20 @@ void UiManager::update(uint32_t nowMs) {
 }
 
 void UiManager::handleButton(const ButtonEvent &event, uint32_t nowMs) {
+  // A press always wakes the display. When the backlight was fully off, the
+  // first event is consumed so an unseen press cannot accidentally start a
+  // reflow cycle or change a setting. Dimmed-screen presses still perform the
+  // requested action after restoring normal brightness.
+  if (registerInteractionAndWake(nowMs)) {
+    dirty_ = true;
+    return;
+  }
+  if (wakeEventGuardUntilMs_ != 0 &&
+      static_cast<int32_t>(nowMs - wakeEventGuardUntilMs_) < 0) {
+    return;
+  }
+  wakeEventGuardUntilMs_ = 0;
+
   if (event.action != ButtonAction::REPEAT) {
     beep();
   }
@@ -135,6 +203,85 @@ void UiManager::syncPageToRunState() {
     page_ = Page::COMPLETE;
   }
   dirty_ = true;
+}
+
+bool UiManager::shouldStayFullyLit() const {
+  switch (engine_.state()) {
+    case RunState::RUNNING:
+    case RunState::PAUSED:
+    case RunState::MANUAL:
+    case RunState::COMPLETE:
+    case RunState::FAULT:
+      return true;
+    case RunState::IDLE:
+    default:
+      return false;
+  }
+}
+
+void UiManager::restoreConfiguredBacklight() {
+  backlight_.setPercent(profiles_.settings().backlightPercent);
+  backlightState_ = BacklightState::ACTIVE;
+}
+
+void UiManager::updateIdleBacklight(uint32_t nowMs) {
+  if (shouldStayFullyLit()) {
+    // Keep safety-critical and active-process screens visible continuously.
+    lastInteractionMs_ = nowMs;
+    if (backlightState_ != BacklightState::ACTIVE) {
+      restoreConfiguredBacklight();
+      dirty_ = true;
+    }
+    return;
+  }
+
+  const SystemSettings &settings = profiles_.settings();
+  const uint32_t idleMs = nowMs - lastInteractionMs_;
+
+  if (settings.idleOffMinutes != TFT_IDLE_TIMEOUT_DISABLED) {
+    const uint32_t offAfterMs =
+        static_cast<uint32_t>(settings.idleOffMinutes) * 60UL * 1000UL;
+    if (idleMs >= offAfterMs) {
+      if (backlightState_ != BacklightState::OFF) {
+        backlight_.off();
+        backlightState_ = BacklightState::OFF;
+      }
+      return;
+    }
+  }
+
+  if (settings.idleDimSeconds != TFT_IDLE_TIMEOUT_DISABLED) {
+    const uint32_t dimAfterMs =
+        static_cast<uint32_t>(settings.idleDimSeconds) * 1000UL;
+    if (idleMs >= dimAfterMs) {
+      const uint8_t dimPercent =
+          min(settings.backlightPercent, settings.idleDimPercent);
+      if (backlightState_ != BacklightState::DIMMED ||
+          backlight_.percent() != dimPercent) {
+        backlight_.setPercent(dimPercent);
+        backlightState_ = BacklightState::DIMMED;
+      }
+      return;
+    }
+  }
+
+  if (backlightState_ != BacklightState::ACTIVE) {
+    restoreConfiguredBacklight();
+    dirty_ = true;
+  }
+}
+
+bool UiManager::registerInteractionAndWake(uint32_t nowMs) {
+  lastInteractionMs_ = nowMs;
+  const bool wasOff = backlightState_ == BacklightState::OFF;
+  if (backlightState_ != BacklightState::ACTIVE) {
+    restoreConfiguredBacklight();
+    dirty_ = true;
+  }
+  if (wasOff) {
+    wakeEventGuardUntilMs_ = nowMs + TFT_WAKE_EVENT_GUARD_MS;
+  }
+  return wasOff;
 }
 
 void UiManager::drawCurrentPage(uint32_t nowMs) {
@@ -860,8 +1007,8 @@ void UiManager::drawLogs() {
 void UiManager::drawSettings() {
   drawHeader("SETTINGS");
   static const char *items[] = {
-      "Button buzzer", "Fan during cool", "Backlight", "Reset profiles",
-      "About", "Back"};
+      "Button buzzer", "Fan during cool", "Backlight", "Idle dim",
+      "Screen off", "Dim level", "Reset profiles", "About", "Back"};
   constexpr uint8_t count = sizeof(items) / sizeof(items[0]);
   cursor_ = clampCursor(cursor_, count);
   uint8_t first = 0;
@@ -878,13 +1025,34 @@ void UiManager::drawSettings() {
     tft_.print(items[i]);
 
     char value[16] = "";
-    if (i == 0) strlcpy(value, profiles_.settings().buzzerEnabled ? "ON" : "OFF", sizeof(value));
-    if (i == 1) strlcpy(value, profiles_.settings().fanDuringCool ? "ON" : "OFF", sizeof(value));
-    if (i == 2) snprintf(value, sizeof(value), "%u%%", profiles_.settings().backlightPercent);
-    if (i == 3) strlcpy(value, "RESTORE", sizeof(value));
-    if (i == 4) strlcpy(value, "OPEN", sizeof(value));
-    if (i == 5) strlcpy(value, "DONE", sizeof(value));
-    tft_.setTextColor(i == 3 ? cRed_ : (i == 5 ? cGreen_ : cMuted_));
+    if (i == 0) {
+      strlcpy(value, profiles_.settings().buzzerEnabled ? "ON" : "OFF",
+              sizeof(value));
+    }
+    if (i == 1) {
+      strlcpy(value, profiles_.settings().fanDuringCool ? "ON" : "OFF",
+              sizeof(value));
+    }
+    if (i == 2) {
+      snprintf(value, sizeof(value), "%u%%",
+               profiles_.settings().backlightPercent);
+    }
+    if (i == 3) {
+      formatIdleDimDelay(profiles_.settings().idleDimSeconds, value,
+                         sizeof(value));
+    }
+    if (i == 4) {
+      formatIdleOffDelay(profiles_.settings().idleOffMinutes, value,
+                         sizeof(value));
+    }
+    if (i == 5) {
+      snprintf(value, sizeof(value), "%u%%",
+               profiles_.settings().idleDimPercent);
+    }
+    if (i == 6) strlcpy(value, "RESTORE", sizeof(value));
+    if (i == 7) strlcpy(value, "OPEN", sizeof(value));
+    if (i == 8) strlcpy(value, "DONE", sizeof(value));
+    tft_.setTextColor(i == 6 ? cRed_ : (i == 8 ? cGreen_ : cMuted_));
     tft_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
     tft_.print(value);
   }
@@ -896,7 +1064,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.5", 79, 2, cText_);
+  drawCentered("Controller v1.6", 79, 2, cText_);
 
   tft_.setTextSize(1);
   tft_.setTextColor(cMuted_);
@@ -1224,7 +1392,7 @@ void UiManager::handleLogs(const ButtonEvent &event) {
 }
 
 void UiManager::handleSettings(const ButtonEvent &event) {
-  constexpr uint8_t itemCount = 6;
+  constexpr uint8_t itemCount = 9;
   if (isPress(event, ButtonId::LEFT)) {
     cursor_ = 3;
     page_ = Page::MENU;
@@ -1233,32 +1401,51 @@ void UiManager::handleSettings(const ButtonEvent &event) {
   } else if (isPress(event, ButtonId::MIDDLE)) {
     switch (cursor_) {
       case 0:
-        profiles_.settings().buzzerEnabled = !profiles_.settings().buzzerEnabled;
+        profiles_.settings().buzzerEnabled =
+            !profiles_.settings().buzzerEnabled;
         profiles_.save();
         break;
       case 1:
-        profiles_.settings().fanDuringCool = !profiles_.settings().fanDuringCool;
+        profiles_.settings().fanDuringCool =
+            !profiles_.settings().fanDuringCool;
         profiles_.save();
         break;
       case 2: {
         uint8_t brightness = profiles_.settings().backlightPercent;
-        brightness = static_cast<uint8_t>(brightness + TFT_BACKLIGHT_STEP_PERCENT);
+        brightness =
+            static_cast<uint8_t>(brightness + TFT_BACKLIGHT_STEP_PERCENT);
         if (brightness > 100U) brightness = TFT_BACKLIGHT_MIN_PERCENT;
         profiles_.settings().backlightPercent = brightness;
-        backlight_.setPercent(brightness);
+        restoreConfiguredBacklight();
         profiles_.save();
         break;
       }
       case 3:
+        profiles_.settings().idleDimSeconds =
+            nextIdleDimSeconds(profiles_.settings().idleDimSeconds);
+        profiles_.save();
+        break;
+      case 4:
+        profiles_.settings().idleOffMinutes =
+            nextIdleOffMinutes(profiles_.settings().idleOffMinutes);
+        profiles_.save();
+        break;
+      case 5:
+        profiles_.settings().idleDimPercent =
+            nextIdleDimPercent(profiles_.settings().idleDimPercent);
+        profiles_.save();
+        break;
+      case 6:
         profiles_.resetDefaults();
         profiles_.save();
         sensor_.setCalibrationOffset(profiles_.settings().temperatureOffsetC);
-        backlight_.setPercent(profiles_.settings().backlightPercent);
+        restoreConfiguredBacklight();
+        lastInteractionMs_ = millis();
         break;
-      case 4:
+      case 7:
         page_ = Page::ABOUT;
         break;
-      case 5:
+      case 8:
         cursor_ = 3;
         page_ = Page::MENU;
         break;

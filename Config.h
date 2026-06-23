@@ -48,12 +48,21 @@ constexpr uint8_t TFT_BACKLIGHT_PWM_BITS = 10;
 constexpr uint8_t TFT_BACKLIGHT_DEFAULT_PERCENT = 80;
 constexpr uint8_t TFT_BACKLIGHT_MIN_PERCENT = 10;
 constexpr uint8_t TFT_BACKLIGHT_STEP_PERCENT = 10;
+
+// Idle backlight policy. Values are persisted in NVS, while these constants
+// provide defaults for new installations and migration from earlier firmware.
+constexpr uint8_t TFT_IDLE_DIM_DEFAULT_SECONDS = 60;
+constexpr uint8_t TFT_IDLE_OFF_DEFAULT_MINUTES = 10;
+constexpr uint8_t TFT_IDLE_DIM_DEFAULT_PERCENT = 20;
+constexpr uint8_t TFT_IDLE_TIMEOUT_DISABLED = 0xFF;
+constexpr uint32_t TFT_WAKE_EVENT_GUARD_MS = 900UL;
+
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 // Initialize using the exact speed proven by the successful ESP32-S3 test,
 // then use a faster but conservative clock for full-screen UI transfers.
 constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
-constexpr uint32_t TFT_SPI_HZ = 40000000UL;
+constexpr uint32_t TFT_SPI_HZ = 10000000UL;
 
 // MAX31865 bus (HSPI).
 constexpr int8_t PIN_MAX31865_CLK = 8;   // Connector group E
@@ -62,8 +71,8 @@ constexpr int8_t PIN_MAX31865_SDI = 18;  // ESP32 MOSI -> MAX31865; group E
 constexpr int8_t PIN_MAX31865_CS  = 40;  // Connector group E
 constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
 constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
-constexpr float RTD_REFERENCE_OHMS = 4300.0f;  // Confirm fitted reference resistor
-constexpr uint8_t RTD_WIRE_COUNT = 2;         // 2, 3, or 4
+constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
+constexpr uint8_t RTD_WIRE_COUNT = 3;         // 2, 3, or 4
 constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 
 // User controls. Buttons connect the GPIO to GND when pressed.

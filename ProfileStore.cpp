@@ -4,6 +4,20 @@
 #include <cstring>
 
 namespace {
+bool validIdleDimSeconds(uint8_t value) {
+  return value == 30U || value == 60U || value == 120U ||
+         value == TFT_IDLE_TIMEOUT_DISABLED;
+}
+
+bool validIdleOffMinutes(uint8_t value) {
+  return value == 5U || value == 10U || value == 30U ||
+         value == TFT_IDLE_TIMEOUT_DISABLED;
+}
+
+bool validIdleDimPercent(uint8_t value) {
+  return value == 10U || value == 20U || value == 30U || value == 40U;
+}
+
 ReflowProfile emptyProfile() {
   ReflowProfile profile{};
   profile.uid = 1;
@@ -38,14 +52,28 @@ bool ProfileStore::begin() {
     return save();
   }
 
-  // v1.2 reserved this byte and initialized it to zero. Reusing that byte
-  // preserves the NVS database layout and existing custom profiles.
+  // The inactivity fields reuse bytes reserved by earlier releases. A zero
+  // value therefore means "not initialized yet" and is migrated to defaults
+  // without invalidating custom profiles or run logs.
+  bool settingsChanged = false;
   if (database_.settings.backlightPercent < TFT_BACKLIGHT_MIN_PERCENT ||
       database_.settings.backlightPercent > 100U) {
     database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
-    return save();
+    settingsChanged = true;
   }
-  return true;
+  if (!validIdleDimSeconds(database_.settings.idleDimSeconds)) {
+    database_.settings.idleDimSeconds = TFT_IDLE_DIM_DEFAULT_SECONDS;
+    settingsChanged = true;
+  }
+  if (!validIdleOffMinutes(database_.settings.idleOffMinutes)) {
+    database_.settings.idleOffMinutes = TFT_IDLE_OFF_DEFAULT_MINUTES;
+    settingsChanged = true;
+  }
+  if (!validIdleDimPercent(database_.settings.idleDimPercent)) {
+    database_.settings.idleDimPercent = TFT_IDLE_DIM_DEFAULT_PERCENT;
+    settingsChanged = true;
+  }
+  return settingsChanged ? save() : true;
 }
 
 bool ProfileStore::save() {
@@ -64,6 +92,9 @@ void ProfileStore::resetDefaults() {
   database_.settings.buzzerEnabled = true;
   database_.settings.fanDuringCool = true;
   database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
+  database_.settings.idleDimSeconds = TFT_IDLE_DIM_DEFAULT_SECONDS;
+  database_.settings.idleOffMinutes = TFT_IDLE_OFF_DEFAULT_MINUTES;
+  database_.settings.idleDimPercent = TFT_IDLE_DIM_DEFAULT_PERCENT;
   createFactoryProfiles();
   database_.selectedIndex = 0;
   database_.crc32 = calculateCrc(database_);
