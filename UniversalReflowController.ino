@@ -8,6 +8,8 @@
 #include "Config.h"
 #include "HeaterController.h"
 #include "ProfileStore.h"
+#include "OtaManager.h"
+#include "PidAutotuner.h"
 #include "ReflowEngine.h"
 #include "Safety.h"
 #include "TemperatureSensor.h"
@@ -27,7 +29,10 @@ ProfileStore profileStore;
 TemperatureSensor temperatureSensor(max31865Spi);
 HeaterController heater;
 ReflowEngine reflowEngine(heater);
-UiManager ui(display, profileStore, reflowEngine, temperatureSensor, backlight);
+PidAutotuner pidAutotuner(heater);
+OtaManager otaManager(heater);
+UiManager ui(display, profileStore, reflowEngine, temperatureSensor, backlight,
+             heater, pidAutotuner, otaManager);
 
 namespace {
 max31865_numwires_t configuredWireMode() {
@@ -78,7 +83,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.7");
+  Serial.println("Universal Reflow Controller v1.8");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
@@ -126,6 +131,10 @@ void setup() {
   display.fillScreen(0x0000);
 
   profileStore.begin();
+  heater.setPidTunings(profileStore.settings().pidKp,
+                       profileStore.settings().pidKi,
+                       profileStore.settings().pidKd);
+  otaManager.begin();
   temperatureSensor.setCalibrationOffset(
       profileStore.settings().temperatureOffsetC);
   const bool sensorStarted = temperatureSensor.begin(configuredWireMode());
@@ -163,17 +172,30 @@ void loop() {
   }
 
   temperatureSensor.update(nowMs);
+  otaManager.update(nowMs);
 
-  reflowEngine.update(temperatureSensor.reading(), nowMs);
+  if (pidAutotuner.active()) {
+    pidAutotuner.update(temperatureSensor.reading(), nowMs);
+  } else if (!otaManager.active()) {
+    reflowEngine.update(temperatureSensor.reading(), nowMs);
+  }
 
   if (reflowEngine.hasPendingLog()) {
     profileStore.addRunLog(reflowEngine.consumePendingLog());
   }
 
-  heater.setDemand(reflowEngine.heaterDemandPercent());
-  const bool inhibit = safetyHeaterInhibited() ||
+  float heaterDemand = reflowEngine.heaterDemandPercent();
+  if (pidAutotuner.active()) {
+    heaterDemand = pidAutotuner.demandPercent();
+  }
+  if (otaManager.active()) {
+    heaterDemand = 0.0f;
+  }
+  heater.setDemand(heaterDemand);
+
+  const bool inhibit = safetyHeaterInhibited() || otaManager.active() ||
                        reflowEngine.state() == RunState::FAULT ||
-                       !temperatureSensor.valid();
+                       pidAutotuner.failed() || !temperatureSensor.valid();
   heater.update(nowMs, inhibit);
 
   updateCoolingFan();

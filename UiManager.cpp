@@ -81,24 +81,14 @@ void formatIdleOffDelay(uint8_t minutes, char *buffer, size_t capacity) {
 
 UiManager::UiManager(CslessST7789 &display, ProfileStore &profiles,
                      ReflowEngine &engine, TemperatureSensor &sensor,
-                     BacklightController &backlight)
+                     BacklightController &backlight, HeaterController &heater,
+                     PidAutotuner &autotuner, OtaManager &ota)
     : display_(display), frame_(240, 240), profiles_(profiles),
-      engine_(engine), sensor_(sensor), backlight_(backlight) {}
+      engine_(engine), sensor_(sensor), backlight_(backlight), heater_(heater),
+      autotuner_(autotuner), ota_(ota) {}
 
 void UiManager::begin() {
-  cBg_ = CslessST7789::color565(10, 12, 18);
-  cPanel_ = CslessST7789::color565(22, 27, 38);
-  cPanel2_ = CslessST7789::color565(31, 37, 52);
-  cLine_ = CslessST7789::color565(65, 76, 96);
-  cText_ = CslessST7789::color565(235, 241, 250);
-  cMuted_ = CslessST7789::color565(155, 166, 184);
-  cCyan_ = CslessST7789::color565(74, 211, 238);
-  cGreen_ = CslessST7789::color565(78, 220, 151);
-  cYellow_ = CslessST7789::color565(245, 198, 76);
-  cOrange_ = CslessST7789::color565(255, 143, 79);
-  cRed_ = CslessST7789::color565(245, 92, 96);
-  cPurple_ = CslessST7789::color565(170, 130, 255);
-  cBlue_ = CslessST7789::color565(92, 145, 255);
+  applyTheme();
 
   if (PIN_BUZZER >= 0) {
     pinMode(PIN_BUZZER, OUTPUT);
@@ -111,6 +101,76 @@ void UiManager::begin() {
   lastInteractionMs_ = millis();
   wakeEventGuardUntilMs_ = 0;
   backlightState_ = BacklightState::ACTIVE;
+  dirty_ = true;
+}
+
+void UiManager::applyTheme() {
+  const UiTheme theme = static_cast<UiTheme>(profiles_.settings().themeId);
+  switch (theme) {
+    case UiTheme::EMBER:
+      cBg_ = CslessST7789::color565(16, 10, 10);
+      cPanel_ = CslessST7789::color565(36, 22, 21);
+      cPanel2_ = CslessST7789::color565(52, 30, 27);
+      cLine_ = CslessST7789::color565(106, 70, 62);
+      cText_ = CslessST7789::color565(250, 240, 232);
+      cMuted_ = CslessST7789::color565(188, 158, 145);
+      cCyan_ = CslessST7789::color565(255, 157, 92);
+      cGreen_ = CslessST7789::color565(112, 224, 151);
+      cYellow_ = CslessST7789::color565(255, 210, 92);
+      cOrange_ = CslessST7789::color565(255, 127, 67);
+      cRed_ = CslessST7789::color565(255, 91, 91);
+      cPurple_ = CslessST7789::color565(219, 136, 255);
+      cBlue_ = CslessST7789::color565(112, 174, 255);
+      break;
+    case UiTheme::FOREST:
+      cBg_ = CslessST7789::color565(8, 15, 13);
+      cPanel_ = CslessST7789::color565(17, 35, 29);
+      cPanel2_ = CslessST7789::color565(26, 50, 41);
+      cLine_ = CslessST7789::color565(62, 96, 78);
+      cText_ = CslessST7789::color565(235, 248, 239);
+      cMuted_ = CslessST7789::color565(143, 177, 158);
+      cCyan_ = CslessST7789::color565(75, 220, 184);
+      cGreen_ = CslessST7789::color565(99, 232, 134);
+      cYellow_ = CslessST7789::color565(232, 211, 93);
+      cOrange_ = CslessST7789::color565(243, 151, 83);
+      cRed_ = CslessST7789::color565(242, 98, 105);
+      cPurple_ = CslessST7789::color565(177, 143, 248);
+      cBlue_ = CslessST7789::color565(91, 166, 242);
+      break;
+    case UiTheme::MONO:
+      cBg_ = CslessST7789::color565(8, 8, 10);
+      cPanel_ = CslessST7789::color565(25, 26, 29);
+      cPanel2_ = CslessST7789::color565(39, 41, 45);
+      cLine_ = CslessST7789::color565(93, 97, 105);
+      cText_ = CslessST7789::color565(245, 246, 248);
+      cMuted_ = CslessST7789::color565(165, 168, 175);
+      cCyan_ = CslessST7789::color565(220, 223, 228);
+      cGreen_ = CslessST7789::color565(201, 224, 205);
+      cYellow_ = CslessST7789::color565(232, 220, 180);
+      cOrange_ = CslessST7789::color565(225, 190, 160);
+      cRed_ = CslessST7789::color565(235, 128, 128);
+      cPurple_ = CslessST7789::color565(200, 183, 230);
+      cBlue_ = CslessST7789::color565(168, 196, 230);
+      break;
+    case UiTheme::OCEAN:
+    default:
+      cBg_ = CslessST7789::color565(10, 12, 18);
+      cPanel_ = CslessST7789::color565(22, 27, 38);
+      cPanel2_ = CslessST7789::color565(31, 37, 52);
+      cLine_ = CslessST7789::color565(65, 76, 96);
+      cText_ = CslessST7789::color565(235, 241, 250);
+      cMuted_ = CslessST7789::color565(155, 166, 184);
+      cCyan_ = CslessST7789::color565(74, 211, 238);
+      cGreen_ = CslessST7789::color565(78, 220, 151);
+      cYellow_ = CslessST7789::color565(245, 198, 76);
+      cOrange_ = CslessST7789::color565(255, 143, 79);
+      cRed_ = CslessST7789::color565(245, 92, 96);
+      cPurple_ = CslessST7789::color565(170, 130, 255);
+      cBlue_ = CslessST7789::color565(92, 145, 255);
+      break;
+  }
+  frameValid_ = false;
+  renderedPageValid_ = false;
   dirty_ = true;
 }
 
@@ -133,7 +193,9 @@ void UiManager::update(uint32_t nowMs) {
 
   const bool dynamicPage = page_ == Page::HOME || page_ == Page::RUNNING ||
                            page_ == Page::RUN_INFO || page_ == Page::MANUAL ||
-                           page_ == Page::COMPLETE || page_ == Page::FAULT;
+                           page_ == Page::COMPLETE || page_ == Page::FAULT ||
+                           page_ == Page::PID_AUTOTUNE ||
+                           page_ == Page::OTA_UPDATE;
   if (!dirty_ && (!dynamicPage ||
                   (nowMs - lastDrawMs_) < UI_REFRESH_INTERVAL_MS)) {
     return;
@@ -180,6 +242,8 @@ void UiManager::handleButton(const ButtonEvent &event, uint32_t nowMs) {
     case Page::CALIBRATION: handleCalibration(event); break;
     case Page::LOGS: handleLogs(event); break;
     case Page::SETTINGS: handleSettings(event); break;
+    case Page::PID_AUTOTUNE: handlePidAutotune(event, nowMs); break;
+    case Page::OTA_UPDATE: handleOtaUpdate(event, nowMs); break;
     case Page::ABOUT: handleAbout(event); break;
     case Page::FAULT: handleFault(event); break;
     case Page::DELETE_CONFIRM: handleDeleteConfirm(event); break;
@@ -207,6 +271,10 @@ void UiManager::syncPageToRunState() {
 }
 
 bool UiManager::shouldStayFullyLit() const {
+  if (ota_.active() || autotuner_.active() ||
+      (page_ == Page::PID_AUTOTUNE && autotuner_.state() != PidAutotuner::State::IDLE)) {
+    return true;
+  }
   switch (engine_.state()) {
     case RunState::RUNNING:
     case RunState::PAUSED:
@@ -311,6 +379,8 @@ void UiManager::drawCurrentPage(uint32_t nowMs) {
     case Page::CALIBRATION: drawCalibration(); break;
     case Page::LOGS: drawLogs(); break;
     case Page::SETTINGS: drawSettings(); break;
+    case Page::PID_AUTOTUNE: drawPidAutotune(nowMs); break;
+    case Page::OTA_UPDATE: drawOtaUpdate(nowMs); break;
     case Page::ABOUT: drawAbout(); break;
     case Page::FAULT: drawFault(); break;
     case Page::DELETE_CONFIRM: drawDeleteConfirm(); break;
@@ -446,24 +516,35 @@ void UiManager::drawCentered(const char *text, int16_t y, uint8_t size,
   frame_.print(text);
 }
 
-void UiManager::drawTemperature(float temperatureC, int16_t x, int16_t y,
-                                uint8_t size, uint16_t color) {
-  char value[12];
+void UiManager::drawTemperature(float temperatureC, int16_t centerX,
+                                int16_t y, uint8_t size, uint16_t color) {
+  char value[16];
   if (std::isfinite(temperatureC)) {
-    snprintf(value, sizeof(value), "%d", static_cast<int>(roundf(temperatureC)));
+    snprintf(value, sizeof(value), "%.1f", temperatureC);
   } else {
-    strlcpy(value, "---", sizeof(value));
+    strlcpy(value, "---.-", sizeof(value));
   }
+
+  const uint8_t unitSize = (size / 2U) > 1U
+                               ? static_cast<uint8_t>(size / 2U)
+                               : 1U;
+  const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6 * size);
+  const int16_t degreeGap = (size / 2U) > 2U ? static_cast<int16_t>(size / 2U) : 2;
+  const int16_t degreeDiameter = (unitSize + 2U) > 3U ? static_cast<int16_t>(unitSize + 2U) : 3;
+  const int16_t cWidth = static_cast<int16_t>(6 * unitSize);
+  const int16_t totalWidth = valueWidth + degreeGap + degreeDiameter + 2 + cWidth;
+  const int16_t x = centerX - totalWidth / 2;
 
   frame_.setTextSize(size);
   frame_.setTextColor(color);
   frame_.setCursor(x, y);
   frame_.print(value);
-  const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6 * size);
-  const int16_t degreeX = x + valueWidth + 2;
-  frame_.drawCircle(degreeX + 2, y + 3, (size / 2U) > 1U ? static_cast<int16_t>(size / 2U) : 1, color);
-  frame_.setTextSize((size / 2U) > 1U ? static_cast<uint8_t>(size / 2U) : 1U);
-  frame_.setCursor(degreeX + 7, y + 2);
+
+  const int16_t degreeX = x + valueWidth + degreeGap;
+  const int16_t radius = (degreeDiameter / 2) > 1 ? degreeDiameter / 2 : 1;
+  frame_.drawCircle(degreeX + radius, y + radius + 1, radius, color);
+  frame_.setTextSize(unitSize);
+  frame_.setCursor(degreeX + degreeDiameter + 2, y + 2);
   frame_.print("C");
 }
 
@@ -606,7 +687,7 @@ void UiManager::drawHome() {
 
   drawPanel(12, 42, 216, 82);
   const float temp = sensor_.valid() ? sensor_.temperatureC() : NAN;
-  drawTemperature(temp, 52, 53, 5, sensor_.valid() ? cCyan_ : cRed_);
+  drawTemperature(temp, 120, 56, 4, sensor_.valid() ? cCyan_ : cRed_);
   drawCentered("Chamber temperature", 103, 1, cMuted_);
 
   drawPanel(12, 133, 216, 72);
@@ -622,7 +703,7 @@ void UiManager::drawHome() {
   frame_.print(profile.name);
 
   char detail[48];
-  snprintf(detail, sizeof(detail), "Peak %.0fC   TAL %us",
+  snprintf(detail, sizeof(detail), "Peak %.1fC   TAL %us",
            profilePeakTargetC(profile),
            profile.targetTimeAboveLiquidusS);
   frame_.setTextSize(1);
@@ -652,7 +733,7 @@ void UiManager::drawProfileList() {
     } else {
       const ReflowProfile &profile = profiles_.profile(index);
       char secondary[40];
-      snprintf(secondary, sizeof(secondary), "Liq %.0fC  max %.0fC",
+      snprintf(secondary, sizeof(secondary), "Liq %.1fC  max %.1fC",
                profile.liquidusC, profile.maxTemperatureC);
       const uint16_t dot = index == profiles_.selectedIndex() ? cGreen_ : cCyan_;
       drawListRow(y, profile.name, secondary, index == cursor_, dot);
@@ -672,7 +753,7 @@ void UiManager::drawProfileDetail() {
   frame_.setTextColor(cMuted_);
   frame_.setCursor(18, 142);
   frame_.print("Liquidus");
-  snprintf(line, sizeof(line), "%.0fC", profile.liquidusC);
+  snprintf(line, sizeof(line), "%.1fC", profile.liquidusC);
   frame_.setTextColor(cText_);
   frame_.setCursor(82, 142);
   frame_.print(line);
@@ -680,7 +761,7 @@ void UiManager::drawProfileDetail() {
   frame_.setTextColor(cMuted_);
   frame_.setCursor(18, 159);
   frame_.print("Max limit");
-  snprintf(line, sizeof(line), "%.0fC", profile.maxTemperatureC);
+  snprintf(line, sizeof(line), "%.1fC", profile.maxTemperatureC);
   frame_.setTextColor(cText_);
   frame_.setCursor(82, 159);
   frame_.print(line);
@@ -727,8 +808,8 @@ void UiManager::drawProfileEdit() {
     char value[32] = "";
     switch (index) {
       case 0: strlcpy(value, editProfile_.name, sizeof(value)); break;
-      case 1: snprintf(value, sizeof(value), "%.0fC", editProfile_.liquidusC); break;
-      case 2: snprintf(value, sizeof(value), "%.0fC", editProfile_.maxTemperatureC); break;
+      case 1: snprintf(value, sizeof(value), "%.1fC", editProfile_.liquidusC); break;
+      case 2: snprintf(value, sizeof(value), "%.1fC", editProfile_.maxTemperatureC); break;
       case 3: snprintf(value, sizeof(value), "%.1fC/s", editProfile_.maxRampCPerSecond); break;
       case 4: snprintf(value, sizeof(value), "%us", editProfile_.targetTimeAboveLiquidusS); break;
       case 5: snprintf(value, sizeof(value), "%u", editProfile_.stageCount); break;
@@ -762,7 +843,7 @@ void UiManager::drawStageList() {
     } else {
       const ReflowStage &stage = editProfile_.stages[index];
       char secondary[48];
-      snprintf(secondary, sizeof(secondary), "%s  %.0fC  %us",
+      snprintf(secondary, sizeof(secondary), "%s  %.1fC  %us",
                stageModeName(stage.mode), stage.targetC, stage.durationS);
       uint16_t dot = stage.mode == StageMode::COOL ? cBlue_ :
                      stage.mode == StageMode::HOLD ? cYellow_ : cOrange_;
@@ -798,7 +879,7 @@ void UiManager::drawStageEdit() {
     switch (index) {
       case 0: strlcpy(value, stage.name, sizeof(value)); break;
       case 1: strlcpy(value, stageModeName(stage.mode), sizeof(value)); break;
-      case 2: snprintf(value, sizeof(value), "%.0fC", stage.targetC); break;
+      case 2: snprintf(value, sizeof(value), "%.1fC", stage.targetC); break;
       case 3: snprintf(value, sizeof(value), "%us", stage.durationS); break;
       case 4: strlcpy(value, editStageIndex_ > 0 ? "Available" : "Top", sizeof(value)); break;
       case 5: strlcpy(value, editStageIndex_ + 1U < editProfile_.stageCount ? "Available" : "Bottom", sizeof(value)); break;
@@ -821,10 +902,10 @@ void UiManager::drawValueEdit() {
   switch (valueKind_) {
     case ValueKind::LIQUIDUS:
       title = "LIQUIDUS"; label = "Solder liquidus";
-      snprintf(value, sizeof(value), "%.0f C", editProfile_.liquidusC); break;
+      snprintf(value, sizeof(value), "%.1f C", editProfile_.liquidusC); break;
     case ValueKind::MAX_TEMPERATURE:
       title = "MAX TEMPERATURE"; label = "Safety ceiling";
-      snprintf(value, sizeof(value), "%.0f C", editProfile_.maxTemperatureC); break;
+      snprintf(value, sizeof(value), "%.1f C", editProfile_.maxTemperatureC); break;
     case ValueKind::MAX_RAMP:
       title = "RAMP LIMIT"; label = "Maximum target ramp";
       snprintf(value, sizeof(value), "%.1f C/s", editProfile_.maxRampCPerSecond); break;
@@ -833,7 +914,7 @@ void UiManager::drawValueEdit() {
       snprintf(value, sizeof(value), "%u seconds", editProfile_.targetTimeAboveLiquidusS); break;
     case ValueKind::STAGE_TARGET:
       title = "STAGE TARGET"; label = editProfile_.stages[editStageIndex_].name;
-      snprintf(value, sizeof(value), "%.0f C", editProfile_.stages[editStageIndex_].targetC); break;
+      snprintf(value, sizeof(value), "%.1f C", editProfile_.stages[editStageIndex_].targetC); break;
     case ValueKind::STAGE_DURATION:
       title = "STAGE DURATION"; label = editProfile_.stages[editStageIndex_].name;
       snprintf(value, sizeof(value), "%u seconds", editProfile_.stages[editStageIndex_].durationS); break;
@@ -879,14 +960,14 @@ void UiManager::drawRunning(uint32_t nowMs) {
   frame_.setCursor(22, 48);
   frame_.print("ACTUAL");
   drawTemperature(sensor_.valid() ? sensor_.temperatureC() : NAN,
-                  22, 64, 3, cCyan_);
+                  62, 68, 2, cCyan_);
 
   drawPanel(128, 40, 100, 62);
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);
   frame_.setCursor(138, 48);
   frame_.print("TARGET");
-  drawTemperature(engine_.targetTemperatureC(), 138, 64, 3, cYellow_);
+  drawTemperature(engine_.targetTemperatureC(), 178, 68, 2, cYellow_);
 
   drawRunGraph(12, 111, 216, 70);
 
@@ -1010,24 +1091,19 @@ void UiManager::drawManual() {
   drawHeader("MANUAL HEAT", active ? "ON" : "OFF",
              active ? cOrange_ : cRed_);
   drawPanel(12, 45, 216, 83);
-  drawTemperature(manualSetpointC_, 48, 57, 5, cOrange_);
+  drawTemperature(manualSetpointC_, 120, 60, 4, cOrange_);
   drawCentered("Setpoint", 106, 1, cMuted_);
 
-  char line[48];
-  snprintf(line, sizeof(line), "Actual: %.1f C",
-           sensor_.valid() ? sensor_.temperatureC() : NAN);
-  frame_.setTextSize(1);
-  frame_.setTextColor(cText_);
-  frame_.setCursor(20, 145);
-  frame_.print(line);
-  drawProgress(20, 166, 200, 15,
+  drawCentered("Actual", 139, 1, cMuted_);
+  drawTemperature(sensor_.valid() ? sensor_.temperatureC() : NAN,
+                  120, 151, 2, cText_);
+  drawProgress(20, 182, 200, 13,
                active ? engine_.heaterDemandPercent() / 100.0f : 0.0f,
                cRed_);
+  char line[48];
   snprintf(line, sizeof(line), "Heater output: %.0f%%",
            active ? engine_.heaterDemandPercent() : 0.0f);
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(20, 190);
-  frame_.print(line);
+  drawCentered(line, 199, 1, cMuted_);
   drawButtons("-", active ? "OFF" : "ON", "+");
 }
 
@@ -1089,7 +1165,8 @@ void UiManager::drawSettings() {
   drawHeader("SETTINGS");
   static const char *items[] = {
       "Button buzzer", "Fan during cool", "Backlight", "Idle dim",
-      "Screen off", "Dim level", "Reset profiles", "About", "Back"};
+      "Screen off", "Dim level", "Theme", "PID autotune",
+      "OTA update", "Reset profiles", "About", "Back"};
   constexpr uint8_t count = sizeof(items) / sizeof(items[0]);
   cursor_ = clampCursor(cursor_, count);
   uint8_t first = 0;
@@ -1105,47 +1182,186 @@ void UiManager::drawSettings() {
     frame_.setCursor(28, y + 9);
     frame_.print(items[i]);
 
-    char value[16] = "";
+    char value[18] = "";
     if (i == 0) {
       strlcpy(value, profiles_.settings().buzzerEnabled ? "ON" : "OFF",
               sizeof(value));
-    }
-    if (i == 1) {
+    } else if (i == 1) {
       strlcpy(value, profiles_.settings().fanDuringCool ? "ON" : "OFF",
               sizeof(value));
-    }
-    if (i == 2) {
+    } else if (i == 2) {
       snprintf(value, sizeof(value), "%u%%",
                profiles_.settings().backlightPercent);
-    }
-    if (i == 3) {
+    } else if (i == 3) {
       formatIdleDimDelay(profiles_.settings().idleDimSeconds, value,
                          sizeof(value));
-    }
-    if (i == 4) {
+    } else if (i == 4) {
       formatIdleOffDelay(profiles_.settings().idleOffMinutes, value,
                          sizeof(value));
-    }
-    if (i == 5) {
+    } else if (i == 5) {
       snprintf(value, sizeof(value), "%u%%",
                profiles_.settings().idleDimPercent);
+    } else if (i == 6) {
+      strlcpy(value, themeName(static_cast<UiTheme>(
+                         profiles_.settings().themeId)), sizeof(value));
+    } else if (i == 7) {
+      strlcpy(value, "OPEN", sizeof(value));
+    } else if (i == 8) {
+      strlcpy(value, ota_.active() ? "ACTIVE" : "OPEN", sizeof(value));
+    } else if (i == 9) {
+      strlcpy(value, "RESTORE", sizeof(value));
+    } else if (i == 10) {
+      strlcpy(value, "OPEN", sizeof(value));
+    } else if (i == 11) {
+      strlcpy(value, "DONE", sizeof(value));
     }
-    if (i == 6) strlcpy(value, "RESTORE", sizeof(value));
-    if (i == 7) strlcpy(value, "OPEN", sizeof(value));
-    if (i == 8) strlcpy(value, "DONE", sizeof(value));
-    frame_.setTextColor(i == 6 ? cRed_ : (i == 8 ? cGreen_ : cMuted_));
+
+    const bool destructive = i == 9;
+    const bool done = i == 11;
+    frame_.setTextColor(destructive ? cRed_ : (done ? cGreen_ : cMuted_));
     frame_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
     frame_.print(value);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
-  drawButtons("BACK", "CHANGE", "DOWN");
+  drawButtons("BACK", "SELECT", "DOWN");
+}
+
+void UiManager::drawPidAutotune(uint32_t nowMs) {
+  (void)nowMs;
+  const bool active = autotuner_.active();
+  const bool complete = autotuner_.complete();
+  const bool failed = autotuner_.failed() ||
+                      autotuner_.state() == PidAutotuner::State::ABORTED;
+  drawHeader("PID AUTOTUNE", autotuner_.stateName(),
+             failed ? cRed_ : (complete ? cGreen_ : cYellow_));
+
+  if (!active && !complete && !failed) {
+    drawPanel(12, 43, 216, 91, true, cOrange_);
+    drawTemperature(autotuneTargetC_, 120, 59, 4, cOrange_);
+    drawCentered("Autotune target", 112, 1, cMuted_);
+    drawCentered("Empty oven; close door", 151, 1, cYellow_);
+    drawCentered("Heater cycles at bounded power", 170, 1, cMuted_);
+    drawCentered("Tune is not saved automatically", 189, 1, cMuted_);
+    drawButtons("-", "START", "+");
+    return;
+  }
+
+  if (complete) {
+    drawPanel(12, 43, 216, 145, true, cGreen_);
+    char line[40];
+    drawCentered("Calculated PID", 54, 2, cGreen_);
+    snprintf(line, sizeof(line), "Kp  %.3f", autotuner_.kp());
+    drawCentered(line, 90, 2, cText_);
+    snprintf(line, sizeof(line), "Ki  %.4f", autotuner_.ki());
+    drawCentered(line, 116, 2, cText_);
+    snprintf(line, sizeof(line), "Kd  %.2f", autotuner_.kd());
+    drawCentered(line, 142, 2, cText_);
+    snprintf(line, sizeof(line), "Tu %.1fs", autotuner_.ultimatePeriodS());
+    drawCentered(line, 171, 1, cMuted_);
+    drawButtons("BACK", "SAVE", "AGAIN");
+    return;
+  }
+
+  if (failed) {
+    drawPanel(12, 48, 216, 122, true, cRed_);
+    drawCentered(autotuner_.stateName(), 61, 3, cRed_);
+    drawCentered(autotuner_.detail(), 112, 1, cText_);
+    drawCentered("Heater is off", 142, 1, cYellow_);
+    drawButtons("BACK", "RESET", "AGAIN");
+    return;
+  }
+
+  drawPanel(12, 41, 100, 69);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 49);
+  frame_.print("ACTUAL");
+  drawTemperature(sensor_.valid() ? sensor_.temperatureC() : NAN,
+                  62, 72, 2, cCyan_);
+
+  drawPanel(128, 41, 100, 69);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(138, 49);
+  frame_.print("TARGET");
+  drawTemperature(autotuner_.targetC(), 178, 72, 2, cYellow_);
+
+  char line[48];
+  snprintf(line, sizeof(line), "Cycles %u / %u",
+           autotuner_.completedCycles(), autotuner_.requiredCycles());
+  drawCentered(line, 124, 2, cText_);
+  snprintf(line, sizeof(line), "Relay output %.0f%%",
+           autotuner_.demandPercent());
+  drawCentered(line, 153, 1, cOrange_);
+  drawCentered(autotuner_.detail(), 175, 1, cMuted_);
+  drawProgress(20, 194, 200, 10,
+               static_cast<float>(autotuner_.completedCycles()) /
+                   autotuner_.requiredCycles(),
+               cGreen_);
+  drawButtons("STOP", "RUNNING", "INFO");
+}
+
+void UiManager::drawOtaUpdate(uint32_t nowMs) {
+  drawHeader("OTA UPDATE", ota_.stateName(),
+             ota_.state() == OtaManager::State::ERROR ? cRed_ : cGreen_);
+
+  if (!ota_.active()) {
+    drawPanel(12, 46, 216, 135, true, cBlue_);
+    drawCentered("Local browser", 61, 2, cCyan_);
+    drawCentered("update", 81, 2, cCyan_);
+    drawCentered("Wi-Fi is normally disabled", 101, 1, cMuted_);
+    drawCentered("START creates a temporary AP", 122, 1, cMuted_);
+    drawCentered("Heater remains forced off", 148, 1, cYellow_);
+    drawCentered("Session closes after 10 minutes", 169, 1, cMuted_);
+    drawButtons("BACK", "START", "BACK");
+    return;
+  }
+
+  drawPanel(12, 41, 216, 159);
+  frame_.setTextSize(1);
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 51);
+  frame_.print("Wi-Fi");
+  frame_.setTextColor(cText_);
+  frame_.setCursor(78, 51);
+  frame_.print(ota_.ssid());
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 75);
+  frame_.print("Password");
+  frame_.setTextColor(cYellow_);
+  frame_.setCursor(78, 75);
+  frame_.print(ota_.password());
+
+  frame_.setTextColor(cMuted_);
+  frame_.setCursor(22, 99);
+  frame_.print("Open");
+  frame_.setTextColor(cCyan_);
+  frame_.setCursor(78, 99);
+  frame_.print(ota_.address());
+
+  if (ota_.uploading() || ota_.state() == OtaManager::State::SUCCESS) {
+    drawProgress(22, 126, 196, 14, ota_.progressPercent() / 100.0f,
+                 cGreen_);
+    char progress[24];
+    snprintf(progress, sizeof(progress), "%u%%", ota_.progressPercent());
+    drawCentered(progress, 147, 2, cText_);
+  } else {
+    char remaining[32];
+    snprintf(remaining, sizeof(remaining), "Closes in %lus",
+             static_cast<unsigned long>(ota_.secondsRemaining(nowMs)));
+    drawCentered(remaining, 131, 1, cMuted_);
+  }
+  drawCentered(ota_.detail(), 177, 1,
+               ota_.state() == OtaManager::State::ERROR ? cRed_ : cMuted_);
+  drawButtons("STOP", ota_.uploading() ? "UPLOAD" : "READY", "STOP");
 }
 
 void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.7", 79, 2, cText_);
+  drawCentered("Controller v1.8", 79, 2, cText_);
 
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);
@@ -1473,7 +1689,7 @@ void UiManager::handleLogs(const ButtonEvent &event) {
 }
 
 void UiManager::handleSettings(const ButtonEvent &event) {
-  constexpr uint8_t itemCount = 9;
+  constexpr uint8_t itemCount = 12;
   if (isPress(event, ButtonId::LEFT)) {
     cursor_ = 3;
     page_ = Page::MENU;
@@ -1516,21 +1732,120 @@ void UiManager::handleSettings(const ButtonEvent &event) {
             nextIdleDimPercent(profiles_.settings().idleDimPercent);
         profiles_.save();
         break;
-      case 6:
+      case 6: {
+        uint8_t next = static_cast<uint8_t>(profiles_.settings().themeId + 1U);
+        if (next >= static_cast<uint8_t>(UiTheme::COUNT)) next = 0;
+        profiles_.settings().themeId = next;
+        profiles_.save();
+        applyTheme();
+        break;
+      }
+      case 7:
+        autotuneTargetC_ = PID_AUTOTUNE_DEFAULT_TARGET_C;
+        autotuner_.reset();
+        page_ = Page::PID_AUTOTUNE;
+        break;
+      case 8:
+        page_ = Page::OTA_UPDATE;
+        break;
+      case 9:
         profiles_.resetDefaults();
         profiles_.save();
         sensor_.setCalibrationOffset(profiles_.settings().temperatureOffsetC);
+        heater_.setPidTunings(profiles_.settings().pidKp,
+                              profiles_.settings().pidKi,
+                              profiles_.settings().pidKd);
+        applyTheme();
         restoreConfiguredBacklight();
         lastInteractionMs_ = millis();
         break;
-      case 7:
+      case 10:
         page_ = Page::ABOUT;
         break;
-      case 8:
+      case 11:
         cursor_ = 3;
         page_ = Page::MENU;
         break;
     }
+  }
+}
+
+void UiManager::handlePidAutotune(const ButtonEvent &event,
+                                  uint32_t nowMs) {
+  if (autotuner_.active()) {
+    if (isPress(event, ButtonId::LEFT)) {
+      autotuner_.abort("Stopped by user");
+    }
+    return;
+  }
+
+  if (autotuner_.complete()) {
+    if (isPress(event, ButtonId::LEFT)) {
+      autotuner_.reset();
+      cursor_ = 7;
+      page_ = Page::SETTINGS;
+    } else if (isPress(event, ButtonId::MIDDLE)) {
+      profiles_.settings().pidKp = autotuner_.kp();
+      profiles_.settings().pidKi = autotuner_.ki();
+      profiles_.settings().pidKd = autotuner_.kd();
+      profiles_.save();
+      heater_.setPidTunings(autotuner_.kp(), autotuner_.ki(),
+                            autotuner_.kd());
+      autotuner_.reset();
+      cursor_ = 7;
+      page_ = Page::SETTINGS;
+    } else if (isPress(event, ButtonId::RIGHT)) {
+      autotuner_.reset();
+    }
+    return;
+  }
+
+  if (autotuner_.failed() ||
+      autotuner_.state() == PidAutotuner::State::ABORTED) {
+    if (isPress(event, ButtonId::LEFT)) {
+      autotuner_.reset();
+      cursor_ = 7;
+      page_ = Page::SETTINGS;
+    } else if (isPress(event, ButtonId::MIDDLE) ||
+               isPress(event, ButtonId::RIGHT)) {
+      autotuner_.reset();
+    }
+    return;
+  }
+
+  if (isAdjust(event, ButtonId::LEFT)) {
+    autotuneTargetC_ = max(PID_AUTOTUNE_MIN_TARGET_C,
+                           autotuneTargetC_ - PID_AUTOTUNE_TARGET_STEP_C);
+  } else if (isAdjust(event, ButtonId::RIGHT)) {
+    autotuneTargetC_ = min(PID_AUTOTUNE_MAX_TARGET_C,
+                           autotuneTargetC_ + PID_AUTOTUNE_TARGET_STEP_C);
+  } else if (isPress(event, ButtonId::MIDDLE) && sensor_.valid() &&
+             engine_.state() == RunState::IDLE && !ota_.active()) {
+    autotuner_.start(autotuneTargetC_, sensor_.reading(), nowMs);
+  }
+}
+
+void UiManager::handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs) {
+  if (!ota_.active()) {
+    if (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT)) {
+      cursor_ = 8;
+      page_ = Page::SETTINGS;
+    } else if (isPress(event, ButtonId::MIDDLE) &&
+               engine_.state() == RunState::IDLE && !autotuner_.active()) {
+      engine_.abortRun();
+      heater_.forceOff();
+      ota_.start(nowMs);
+    }
+    return;
+  }
+
+  // Uploading is intentionally not interruptible from the buttons because
+  // aborting a flash write is more hazardous than allowing it to finish.
+  if (!ota_.uploading() &&
+      (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT))) {
+    ota_.stop();
+    cursor_ = 8;
+    page_ = Page::SETTINGS;
   }
 }
 

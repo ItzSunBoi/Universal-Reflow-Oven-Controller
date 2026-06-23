@@ -7,6 +7,9 @@
 #include "Config.h"
 #include "ButtonInput.h"
 #include "ProfileStore.h"
+#include "HeaterController.h"
+#include "OtaManager.h"
+#include "PidAutotuner.h"
 #include "ReflowEngine.h"
 #include "TemperatureSensor.h"
 
@@ -14,7 +17,8 @@ class UiManager {
  public:
   UiManager(CslessST7789 &display, ProfileStore &profiles,
             ReflowEngine &engine, TemperatureSensor &sensor,
-            BacklightController &backlight);
+            BacklightController &backlight, HeaterController &heater,
+            PidAutotuner &autotuner, OtaManager &ota);
 
   void begin();
   void update(uint32_t nowMs);
@@ -39,6 +43,8 @@ class UiManager {
     CALIBRATION,
     LOGS,
     SETTINGS,
+    PID_AUTOTUNE,
+    OTA_UPDATE,
     ABOUT,
     FAULT,
     DELETE_CONFIRM,
@@ -70,6 +76,9 @@ class UiManager {
   ReflowEngine &engine_;
   TemperatureSensor &sensor_;
   BacklightController &backlight_;
+  HeaterController &heater_;
+  PidAutotuner &autotuner_;
+  OtaManager &ota_;
 
   Page page_ = Page::HOME;
   Page valueReturnPage_ = Page::PROFILE_EDIT;
@@ -85,6 +94,7 @@ class UiManager {
   ReflowProfile editProfile_{};
   float calibrationWorkingC_ = 0.0f;
   float manualSetpointC_ = 120.0f;
+  float autotuneTargetC_ = PID_AUTOTUNE_DEFAULT_TARGET_C;
 
   bool dirty_ = true;
   bool frameValid_ = false;
@@ -117,6 +127,7 @@ class UiManager {
   bool registerInteractionAndWake(uint32_t nowMs);
   bool shouldStayFullyLit() const;
   void restoreConfiguredBacklight();
+  void applyTheme();
   void drawCurrentPage(uint32_t nowMs);
   void flushFrame(bool forceFullFrame);
   uint32_t hashTile(const uint16_t *buffer, int16_t x, int16_t y,
@@ -138,6 +149,8 @@ class UiManager {
   void drawCalibration();
   void drawLogs();
   void drawSettings();
+  void drawPidAutotune(uint32_t nowMs);
+  void drawOtaUpdate(uint32_t nowMs);
   void drawAbout();
   void drawFault();
   void drawDeleteConfirm();
@@ -149,7 +162,7 @@ class UiManager {
                  bool selected = false, uint16_t accent = 0);
   void drawCentered(const char *text, int16_t y, uint8_t size,
                     uint16_t color);
-  void drawTemperature(float temperatureC, int16_t x, int16_t y,
+  void drawTemperature(float temperatureC, int16_t centerX, int16_t y,
                        uint8_t size, uint16_t color);
   void drawProgress(int16_t x, int16_t y, int16_t w, int16_t h,
                     float fraction, uint16_t color);
@@ -177,6 +190,8 @@ class UiManager {
   void handleCalibration(const ButtonEvent &event);
   void handleLogs(const ButtonEvent &event);
   void handleSettings(const ButtonEvent &event);
+  void handlePidAutotune(const ButtonEvent &event, uint32_t nowMs);
+  void handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs);
   void handleAbout(const ButtonEvent &event);
   void handleFault(const ButtonEvent &event);
   void handleDeleteConfirm(const ButtonEvent &event);

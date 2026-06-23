@@ -9,6 +9,14 @@ enum class StageMode : uint8_t {
   COOL = 2,
 };
 
+enum class UiTheme : uint8_t {
+  OCEAN = 0,
+  EMBER = 1,
+  FOREST = 2,
+  MONO = 3,
+  COUNT = 4,
+};
+
 struct ReflowStage {
   char name[12];
   StageMode mode;
@@ -31,20 +39,22 @@ struct ReflowProfile {
 
 struct SystemSettings {
   float temperatureOffsetC;
-  bool buzzerEnabled;
-  bool fanDuringCool;
-  uint8_t backlightPercent;
+  float pidKp;
+  float pidKi;
+  float pidKd;
 
-  // These fields reuse the four bytes reserved by earlier firmware, keeping
-  // the NVS database layout compatible with existing profiles and run logs.
+  uint8_t buzzerEnabled;
+  uint8_t fanDuringCool;
+  uint8_t backlightPercent;
   uint8_t idleDimSeconds;
   uint8_t idleOffMinutes;
   uint8_t idleDimPercent;
+  uint8_t themeId;
   uint8_t reserved;
 };
 
-static_assert(sizeof(SystemSettings) == 12,
-              "SystemSettings layout changed; NVS migration is required");
+static_assert(sizeof(SystemSettings) == 24,
+              "SystemSettings layout changed; update NVS migration");
 
 struct RunSummary {
   uint32_t sequence;
@@ -90,6 +100,16 @@ inline const char *stageModeName(StageMode mode) {
     case StageMode::HOLD: return "Hold";
     case StageMode::COOL: return "Cool";
     default: return "?";
+  }
+}
+
+inline const char *themeName(UiTheme theme) {
+  switch (theme) {
+    case UiTheme::OCEAN: return "OCEAN";
+    case UiTheme::EMBER: return "EMBER";
+    case UiTheme::FOREST: return "FOREST";
+    case UiTheme::MONO: return "MONO";
+    default: return "OCEAN";
   }
 }
 

@@ -17,11 +17,14 @@ class HeaterController {
 
   float demandPercent() const { return demandPercent_; }
   bool outputOn() const { return outputOn_; }
+  float kp() const { return kp_; }
+  float ki() const { return ki_; }
+  float kd() const { return kd_; }
 
  private:
-  float kp_ = 5.0f;
-  float ki_ = 0.10f;
-  float kd_ = 18.0f;
+  float kp_ = PID_DEFAULT_KP;
+  float ki_ = PID_DEFAULT_KI;
+  float kd_ = PID_DEFAULT_KD;
 
   float integral_ = 0.0f;
   float lastMeasurement_ = 0.0f;

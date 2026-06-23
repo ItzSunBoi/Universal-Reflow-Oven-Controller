@@ -1,73 +1,59 @@
-# Firmware architecture
+# Architecture v1.8
 
-## Runtime execution
+## Runtime ownership
 
-### Main Arduino task
+- The Arduino main loop owns the temperature sensor, reflow engine, heater demand, safety gates, OTA service, UI state, and display flushing.
+- A FreeRTOS task pinned to core 0 scans the three buttons every 2 ms and pushes debounced events into a queue.
+- The display is composed into a 240x240 RGB565 framebuffer. Only changed 24x24 tiles are transferred.
 
-The main task performs:
+## SPI separation
 
-1. drain queued button events and update UI state
-2. sample the MAX31865 when due
-3. update the reflow state machine and safety monitors
-4. persist completed run summaries
-5. update SSR time-proportioning output
-6. update the optional cooling fan
-7. render the UI when required
+The CS-less display is permanently selected and therefore uses FSPI exclusively. The MAX31865 uses HSPI with its own CS. The buses do not share SCK or MOSI.
 
-### Independent button task
+## Persistent data
 
-`ButtonInput` starts a FreeRTOS task pinned to core 0. It scans the three GPIOs every 2 ms, performs debounce and hold timing, and places events in a thread-safe FreeRTOS queue.
+`ProfileStore` stores a CRC-protected database in NVS. Database version 4 adds:
 
-The display may occupy the main task during an SPI transfer, but button state continues to be sampled. Events are consumed as soon as the main task returns.
+- persistent PID Kp, Ki, and Kd;
+- selected UI theme.
 
-## UI rendering pipeline
+A valid v1.7/version-3 database is migrated while preserving profiles, logs, calibration, backlight, idle settings, buzzer, and fan preferences.
 
-The physical LCD is never intentionally cleared before a normal redraw.
+## OTA state machine
 
-1. `UiManager` clears a 240x240 `GFXcanvas16` framebuffer in SRAM.
-2. The complete page is drawn into that invisible buffer.
-3. The screen is divided into 24x24 tiles.
-4. FNV-1a hashes are calculated for all 100 tiles.
-5. On a stable page, only tiles whose hashes changed are transmitted.
-6. On a page transition, the complete finished framebuffer is transmitted once.
+`OFF -> READY -> UPLOADING -> SUCCESS`
 
-This requires one 115,200-byte RGB565 framebuffer. Tile hashes require only 400 additional bytes, avoiding the cost of a second framebuffer.
+Any setup, authorization, image, or flash error enters `ERROR`. Wi-Fi is disabled in `OFF`.
 
-The technique addresses clear/redraw flicker while retaining the original Adafruit GFX drawing code and page geometry.
+Starting OTA:
 
-## Display driver
+1. verifies that an inactive OTA application partition exists;
+2. forces the SSR demand and physical output off;
+3. generates a random SoftAP SSID, password, and upload token;
+4. starts a local HTTP server.
 
-The custom `CslessST7789` driver uses:
+The upload handler requires the random token, checks the `.bin` suffix and ESP32 image magic byte, writes through the ESP32 `Update` API, finalizes the inactive partition, then restarts. OTA activity is an independent hard heater inhibit in the main loop.
 
-- a dedicated FSPI controller
-- no CS toggling
-- SPI mode 2
-- the initialization sequence proven on the physical display
-- a stride-aware `pushImage()` method for complete frames and dirty tiles
+## PID autotune state machine
 
-The MAX31865 uses the separate HSPI controller because any traffic on a shared bus would also be interpreted by the permanently selected display.
+`IDLE -> PREHEAT -> COOLING <-> HEATING -> COMPLETE`
 
-## Other modules
+Fault or cancellation produces `FAULT` or `ABORTED` and immediately forces the heater off.
 
-- `Safety`: startup SSR inhibit and immediate software hard-off helper
-- `TemperatureSensor`: MAX31865 communication, filtering, calibration, and faults
-- `HeaterController`: PID and slow time-proportioned zero-cross SSR output
-- `ReflowEngine`: ramp/hold/cool state machine, graph history, and safety monitors
-- `ProfileStore`: CRC-protected NVS profiles, settings, and run summaries
-- `BacklightController`: LEDC PWM for the BLK input
-- `UiManager`: all pages, editors, idle brightness, framebuffer, and tile flushing
+The tuner applies 70% output until crossing target plus hysteresis, then 0% until crossing target minus hysteresis. It measures peak, trough, and high-crossing period. The first oscillation is discarded; later cycles are averaged. It calculates classical Ziegler-Nichols PID values in the same continuous-time units used by `HeaterController`.
 
-## Storage
+The result is not applied or persisted until the user presses `SAVE`.
 
-Profiles and settings are stored in ESP32 NVS through Arduino `Preferences`. A schema mismatch or CRC failure restores the built-in defaults.
+## UI themes
 
-## Connector isolation
+Theme selection swaps one runtime palette containing background, panel, line, text, muted, and accent colors. Rendering geometry and navigation are shared by all themes.
 
-- Display: connector groups A and D
-- MAX31865: group E
-- Buttons: group C
-- SSR: group F
-- Optional buzzer: group B
-- Optional fan: group G
+## Heater arbitration
 
-No connector group is shared between different modules.
+Demand priority is:
+
+1. OTA active: 0%;
+2. PID autotune active: tuner demand;
+3. otherwise: reflow engine demand.
+
+The SSR remains inhibited for sensor invalidity, global safety inhibit, reflow fault, OTA activity, or autotune fault.

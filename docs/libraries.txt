@@ -1,4 +1,11 @@
-ESP32 Arduino core 3.x
+ESP32 Arduino core 3.2.1 or later recommended
 Adafruit GFX Library
 Adafruit MAX31865 library
 Adafruit BusIO
+
+Built into ESP32 Arduino core:
+WiFi
+WebServer
+Update
+Preferences
+FreeRTOS

@@ -1,9 +1,49 @@
 #include "ProfileStore.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
 namespace {
+struct LegacySystemSettingsV3 {
+  float temperatureOffsetC;
+  bool buzzerEnabled;
+  bool fanDuringCool;
+  uint8_t backlightPercent;
+  uint8_t idleDimSeconds;
+  uint8_t idleOffMinutes;
+  uint8_t idleDimPercent;
+  uint8_t reserved;
+};
+static_assert(sizeof(LegacySystemSettingsV3) == 12,
+              "Legacy settings layout mismatch");
+
+struct LegacyDatabaseV3 {
+  uint32_t magic;
+  uint16_t version;
+  uint8_t profileCount;
+  uint8_t selectedIndex;
+  ReflowProfile profiles[MAX_PROFILES];
+  LegacySystemSettingsV3 settings;
+  RunSummary logs[MAX_RUN_LOGS];
+  uint8_t runLogCount;
+  uint8_t nextLogIndex;
+  uint8_t reserved[2];
+  uint32_t crc32;
+};
+
+uint32_t crc32Bytes(const uint8_t *bytes, size_t length) {
+  uint32_t crc = 0xFFFFFFFFUL;
+  for (size_t i = 0; i < length; ++i) {
+    crc ^= bytes[i];
+    for (uint8_t bit = 0; bit < 8; ++bit) {
+      const uint32_t mask = -(crc & 1UL);
+      crc = (crc >> 1U) ^ (0xEDB88320UL & mask);
+    }
+  }
+  return ~crc;
+}
+
 bool validIdleDimSeconds(uint8_t value) {
   return value == 30U || value == 60U || value == 120U ||
          value == TFT_IDLE_TIMEOUT_DISABLED;
@@ -16,6 +56,17 @@ bool validIdleOffMinutes(uint8_t value) {
 
 bool validIdleDimPercent(uint8_t value) {
   return value == 10U || value == 20U || value == 30U || value == 40U;
+}
+
+bool validPid(float kp, float ki, float kd) {
+  return std::isfinite(kp) && std::isfinite(ki) && std::isfinite(kd) &&
+         kp >= 0.01f && kp <= 100.0f &&
+         ki >= 0.0f && ki <= 10.0f &&
+         kd >= 0.0f && kd <= 500.0f;
+}
+
+bool validTheme(uint8_t value) {
+  return value < static_cast<uint8_t>(UiTheme::COUNT);
 }
 
 ReflowProfile emptyProfile() {
@@ -43,19 +94,67 @@ bool ProfileStore::begin() {
   }
 
   const size_t storedSize = preferences_.getBytesLength(NVS_KEY);
+  bool loaded = false;
+  bool migrated = false;
+
   if (storedSize == sizeof(Database)) {
     preferences_.getBytes(NVS_KEY, &database_, sizeof(Database));
+    loaded = databaseValid();
+  } else if (storedSize == sizeof(LegacyDatabaseV3)) {
+    LegacyDatabaseV3 legacy{};
+    preferences_.getBytes(NVS_KEY, &legacy, sizeof(legacy));
+    const bool crcOk = legacy.crc32 == crc32Bytes(
+        reinterpret_cast<const uint8_t *>(&legacy),
+        offsetof(LegacyDatabaseV3, crc32));
+    if (legacy.magic == DATABASE_MAGIC && legacy.version == 3U && crcOk &&
+        legacy.profileCount > 0U && legacy.profileCount <= MAX_PROFILES &&
+        legacy.selectedIndex < legacy.profileCount) {
+      database_ = Database{};
+      database_.magic = DATABASE_MAGIC;
+      database_.version = PROFILE_STORE_VERSION;
+      database_.profileCount = legacy.profileCount;
+      database_.selectedIndex = legacy.selectedIndex;
+      memcpy(database_.profiles, legacy.profiles, sizeof(legacy.profiles));
+      memcpy(database_.logs, legacy.logs, sizeof(legacy.logs));
+      database_.runLogCount = legacy.runLogCount < MAX_RUN_LOGS ? legacy.runLogCount : MAX_RUN_LOGS;
+      database_.nextLogIndex = legacy.nextLogIndex % MAX_RUN_LOGS;
+      database_.settings.temperatureOffsetC =
+          legacy.settings.temperatureOffsetC;
+      database_.settings.buzzerEnabled = legacy.settings.buzzerEnabled;
+      database_.settings.fanDuringCool = legacy.settings.fanDuringCool;
+      database_.settings.backlightPercent = legacy.settings.backlightPercent;
+      database_.settings.idleDimSeconds = legacy.settings.idleDimSeconds;
+      database_.settings.idleOffMinutes = legacy.settings.idleOffMinutes;
+      database_.settings.idleDimPercent = legacy.settings.idleDimPercent;
+      database_.settings.pidKp = PID_DEFAULT_KP;
+      database_.settings.pidKi = PID_DEFAULT_KI;
+      database_.settings.pidKd = PID_DEFAULT_KD;
+      database_.settings.themeId = static_cast<uint8_t>(UiTheme::OCEAN);
+      database_.crc32 = calculateCrc(database_);
+      loaded = databaseValid();
+      migrated = loaded;
+    }
   }
 
-  if (!databaseValid()) {
+  if (!loaded) {
     resetDefaults();
     return save();
   }
 
-  // The inactivity fields reuse bytes reserved by earlier releases. A zero
-  // value therefore means "not initialized yet" and is migrated to defaults
-  // without invalidating custom profiles or run logs.
-  bool settingsChanged = false;
+  bool settingsChanged = migrated;
+  if (!std::isfinite(database_.settings.temperatureOffsetC) ||
+      database_.settings.temperatureOffsetC < -20.0f ||
+      database_.settings.temperatureOffsetC > 20.0f) {
+    database_.settings.temperatureOffsetC = 0.0f;
+    settingsChanged = true;
+  }
+  if (!validPid(database_.settings.pidKp, database_.settings.pidKi,
+                database_.settings.pidKd)) {
+    database_.settings.pidKp = PID_DEFAULT_KP;
+    database_.settings.pidKi = PID_DEFAULT_KI;
+    database_.settings.pidKd = PID_DEFAULT_KD;
+    settingsChanged = true;
+  }
   if (database_.settings.backlightPercent < TFT_BACKLIGHT_MIN_PERCENT ||
       database_.settings.backlightPercent > 100U) {
     database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
@@ -71,6 +170,10 @@ bool ProfileStore::begin() {
   }
   if (!validIdleDimPercent(database_.settings.idleDimPercent)) {
     database_.settings.idleDimPercent = TFT_IDLE_DIM_DEFAULT_PERCENT;
+    settingsChanged = true;
+  }
+  if (!validTheme(database_.settings.themeId)) {
+    database_.settings.themeId = static_cast<uint8_t>(UiTheme::OCEAN);
     settingsChanged = true;
   }
   return settingsChanged ? save() : true;
@@ -89,12 +192,16 @@ void ProfileStore::resetDefaults() {
   database_.magic = DATABASE_MAGIC;
   database_.version = PROFILE_STORE_VERSION;
   database_.settings.temperatureOffsetC = 0.0f;
+  database_.settings.pidKp = PID_DEFAULT_KP;
+  database_.settings.pidKi = PID_DEFAULT_KI;
+  database_.settings.pidKd = PID_DEFAULT_KD;
   database_.settings.buzzerEnabled = true;
   database_.settings.fanDuringCool = true;
   database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
   database_.settings.idleDimSeconds = TFT_IDLE_DIM_DEFAULT_SECONDS;
   database_.settings.idleOffMinutes = TFT_IDLE_OFF_DEFAULT_MINUTES;
   database_.settings.idleDimPercent = TFT_IDLE_DIM_DEFAULT_PERCENT;
+  database_.settings.themeId = static_cast<uint8_t>(UiTheme::OCEAN);
   createFactoryProfiles();
   database_.selectedIndex = 0;
   database_.crc32 = calculateCrc(database_);
@@ -229,17 +336,8 @@ bool ProfileStore::validateProfile(const ReflowProfile &profileValue) const {
 }
 
 uint32_t ProfileStore::calculateCrc(const Database &databaseValue) const {
-  const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&databaseValue);
-  const size_t length = offsetof(Database, crc32);
-  uint32_t crc = 0xFFFFFFFFUL;
-  for (size_t i = 0; i < length; ++i) {
-    crc ^= bytes[i];
-    for (uint8_t bit = 0; bit < 8; ++bit) {
-      const uint32_t mask = -(crc & 1UL);
-      crc = (crc >> 1U) ^ (0xEDB88320UL & mask);
-    }
-  }
-  return ~crc;
+  return crc32Bytes(reinterpret_cast<const uint8_t *>(&databaseValue),
+                    offsetof(Database, crc32));
 }
 
 bool ProfileStore::databaseValid() const {

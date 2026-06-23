@@ -107,6 +107,34 @@ constexpr uint16_t BUTTON_EVENT_QUEUE_LENGTH = 32;
 constexpr uint16_t BUTTON_TASK_STACK_BYTES = 3072;
 constexpr uint8_t BUTTON_TASK_PRIORITY = 2;
 constexpr int8_t BUTTON_TASK_CORE = 0;
+
+// Persisted heater PID defaults. PID autotune can replace these values in NVS.
+constexpr float PID_DEFAULT_KP = 5.0f;
+constexpr float PID_DEFAULT_KI = 0.10f;
+constexpr float PID_DEFAULT_KD = 18.0f;
+
+// Relay-feedback PID autotune. The heater alternates between 0% and this
+// bounded high output around the selected target, similar to printer firmware
+// M303-style tuning, while global overtemperature limits remain active.
+constexpr float PID_AUTOTUNE_DEFAULT_TARGET_C = 200.0f;
+constexpr float PID_AUTOTUNE_MIN_TARGET_C = 100.0f;
+constexpr float PID_AUTOTUNE_MAX_TARGET_C = 250.0f;
+constexpr float PID_AUTOTUNE_TARGET_STEP_C = 5.0f;
+constexpr float PID_AUTOTUNE_HYSTERESIS_C = 2.0f;
+constexpr float PID_AUTOTUNE_RELAY_HIGH_PERCENT = 70.0f;
+constexpr float PID_AUTOTUNE_MAX_OVERSHOOT_C = 25.0f;
+constexpr uint8_t PID_AUTOTUNE_CYCLES = 6;
+constexpr uint32_t PID_AUTOTUNE_PHASE_TIMEOUT_MS = 8UL * 60UL * 1000UL;
+constexpr uint32_t PID_AUTOTUNE_TOTAL_TIMEOUT_MS = 30UL * 60UL * 1000UL;
+
+// Local, explicit browser OTA session. Wi-Fi stays off until the user opens
+// Settings -> OTA update and presses START. The ESP32 creates a password-
+// protected access point and automatically closes it after the timeout.
+constexpr uint8_t OTA_WIFI_CHANNEL = 6;
+constexpr uint8_t OTA_MAX_CLIENTS = 1;
+constexpr uint32_t OTA_SESSION_TIMEOUT_MS = 10UL * 60UL * 1000UL;
+constexpr uint32_t OTA_RESTART_DELAY_MS = 1800UL;
+
 constexpr uint32_t SSR_WINDOW_MS = 2000;
 constexpr uint32_t SSR_MIN_PULSE_MS = 100;
 constexpr float GLOBAL_MAX_TEMPERATURE_C = 285.0f;
@@ -115,9 +143,9 @@ constexpr float GLOBAL_MAX_VALID_TEMPERATURE_C = 350.0f;
 constexpr uint8_t MAX_CONSECUTIVE_SENSOR_FAILURES = 3;
 
 constexpr uint8_t MAX_PROFILES = 8;
-constexpr uint8_t MAX_PROFILE_STAGES = 10;
+constexpr uint8_t MAX_PROFILE_STAGES = 7;
 constexpr uint8_t MAX_RUN_LOGS = 8;
-constexpr uint16_t PROFILE_STORE_VERSION = 3;
+constexpr uint16_t PROFILE_STORE_VERSION = 4;
 
 constexpr uint8_t ssrOnLevel() {
   return SSR_ACTIVE_HIGH ? HIGH : LOW;

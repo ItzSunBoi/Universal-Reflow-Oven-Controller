@@ -1,30 +1,24 @@
-# Validation status
+# Validation status v1.8
 
-## Completed checks
+## Completed static/build checks
 
-- All project `.cpp` and `.ino` sources compile and link in the local C++17 Arduino/Adafruit API-shape validation environment.
-- Validation flags: `-Wall -Wextra -Wpedantic`.
-- No compiler warnings were produced.
-- `UiManager` renders to a 240x240 RGB565 framebuffer rather than clearing the physical LCD.
-- Page changes use one complete frame transfer.
-- Stable pages transmit only changed 24x24 tiles.
-- Tile hashing uses one framebuffer rather than two, limiting additional UI RAM use.
-- `CslessST7789::pushImage()` supports cropped, stride-based RGB565 transfers.
-- Button scanning runs in a FreeRTOS task on core 0 with a thread-safe event queue.
-- The Arduino loop retains a cooperative button fallback if task creation fails.
-- The display and MAX31865 remain on separate SPI controllers and physical buses.
-- NVS profile format remains unchanged, preserving existing profiles and settings.
-- Connector-group isolation remains unchanged.
+- Every project `.cpp` and the `.ino` translation unit were compiled as C++17 with warnings enabled against Arduino/ESP32/Adafruit API-shape stubs.
+- All resulting objects linked into one validation executable.
+- The validation executable ran successfully.
+- NVS version-3 migration and version-4 default paths were source-reviewed.
+- OTA heater arbitration, timeout, upload token, image-header check, progress, and restart paths were source-reviewed.
+- PID autotune cancellation, sensor-fault, overtemperature, phase-timeout, total-timeout, review, and save paths were source-reviewed.
+- The original Ocean palette remains the default; three additional palettes use the same geometry.
+- Primary live temperature rendering uses the centered one-decimal helper.
 
-## Still required on the physical ESP32-S3
+## Not yet physically validated
 
-1. Compile with the installed Arduino-ESP32 3.x core and current Adafruit libraries.
-2. Confirm startup reports `Button scanner: asynchronous core task` over serial.
-3. Press and release each button repeatedly while changing pages and while the running graph updates.
-4. Verify there is no visible black clear frame during updates.
-5. Observe whether partial tile updates produce any residual tearing at 10 MHz.
-6. If required, test 4 MHz and a 250-500 ms UI refresh interval.
-7. Check free heap after startup because the framebuffer consumes 115,200 bytes.
-8. Complete heater, SSR, sensor, and thermal-safety commissioning with mains isolated first.
+- Compilation against the user's exact installed Arduino-ESP32 and library versions.
+- Flashing with the included custom partition table.
+- Browser uploads from each phone/computer platform.
+- Power-loss behavior at every point during an OTA upload.
+- PID autotune performance on the user's actual oven.
+- Stability of the calculated gains over different PCB loads.
+- Mains wiring, SSR thermal performance, thermal-fuse behavior, and enclosure safety.
 
-The default thermal profiles and PID values remain starting templates and must be validated for the actual oven and solder paste.
+Use ESP32 Arduino core 3.2.1 or later and perform first tests with the heater disconnected.
