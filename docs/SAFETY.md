@@ -1,39 +1,42 @@
-# Safety notes v1.8
+# Safety requirements
 
-## Independent protection remains mandatory
+This firmware controls a heating appliance and cannot make an unsafe mains design safe.
 
-Use a non-software thermal fuse in intimate thermal contact with the oven, an appropriately rated mains fuse, protective earthing, insulated mains terminals, strain relief, and a grounded enclosure. The accessible plug or isolation switch must remove heater power.
+## Required independent protections
 
-An AC SSR can fail short-circuit. Firmware switching the GPIO off cannot stop a welded or failed-short SSR.
+- Correctly rated fuse at the mains input.
+- Non-resettable thermal fuse physically coupled to the oven/heater region and wired in series with the heater.
+- Properly rated zero-cross SSR from a reputable source, mounted to a heatsink where required.
+- Protective earth bonded to all exposed conductive enclosure parts.
+- Strain relief, mains-rated wire, insulated terminals, creepage/clearance, and a closed flame-resistant enclosure.
+- An accessible plug or switched outlet that disconnects the heater mains circuit.
+- SSR failure should be assumed to be potentially short-circuit/on.
 
-## OTA
+## Firmware protections included
 
-OTA can only be started explicitly from Settings while normal profile control is idle. During an OTA session:
+- SSR commanded off before peripheral initialization.
+- Startup software inhibit remains active until peripheral setup completes.
+- MAX31865 fault detection and invalid-sample lockout.
+- Global 285 C ceiling.
+- Per-profile temperature ceiling.
+- Heater-response monitor.
+- Conservative temperature-rise-while-off monitor.
+- No explicit delay-based waits in the control loop; display transfers are minimized through dirty-tile updates.
+- CRC-checked NVS profile database.
 
-- the heater output is forced off continuously;
-- reflow and manual heating cannot run;
-- Wi-Fi exists only for the temporary session;
-- the access point uses a generated password;
-- the upload form uses a generated per-session token;
-- only an ESP32 application image is accepted;
-- power must remain connected during flash writing and verification.
+## Emergency behavior
 
-Do not perform OTA while the oven is hot or unattended. Update only firmware that you built or obtained from a trusted source.
+Version 1.7 intentionally has no GPIO emergency-stop input. The normal UI STOP action commands the SSR off, but emergency isolation is performed by unplugging the oven or switching off the outlet supplying the heater.
 
-## PID autotune
+This only works as intended when the accessible disconnect removes power from the heater circuit. A separate controller supply must not leave the heater energized through another path.
 
-Autotune deliberately heats and cools the oven repeatedly. Run it only with:
+## Commissioning sequence
 
-- an empty oven;
-- the normal sensor securely installed;
-- the door closed in its normal operating position;
-- the normal insulation and airflow arrangement;
-- direct supervision throughout the process.
-
-Autotune is bounded by a 70% high output, target limits, target-plus-25 C overshoot limit, global 285 C limit, sensor validity checks, phase timeout, and total timeout. These reduce risk but do not replace independent thermal protection.
-
-Review the proposed PID gains before saving. Closely supervise the first profile run after changing gains and be ready to disconnect mains power.
-
-## Initial testing
-
-Keep mains and the heater disconnected while confirming display operation, buttons, MAX31865 readings, profile storage, themes, and the OTA web page. Test the SSR output initially with a low-voltage indicator load.
+1. Test all logic from an isolated low-voltage supply with mains absent.
+2. Measure the SSR GPIO during boot, reset, and firmware upload.
+3. Verify that unplugging or switching off the supply physically removes heater power.
+4. Use an isolated low-voltage load before connecting the heater.
+5. Confirm the temperature sensor remains accurate throughout the oven's operating range.
+6. Run a low-temperature empty-oven test.
+7. Run a sacrificial-board test with an independent contact probe.
+8. Do not leave the oven unattended.

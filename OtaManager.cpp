@@ -269,30 +269,14 @@ String OtaManager::buildUploadPage() const {
 void OtaManager::makeHex(char *out, size_t capacity, uint64_t value,
                          uint8_t digits) {
   static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
-
-  if (capacity == 0) {
-    return;
-  }
-
+  if (capacity == 0) return;
   const uint8_t maxDigits = static_cast<uint8_t>(capacity - 1U);
-
-  if (digits > maxDigits) {
-    digits = maxDigits;
-  }
-
-  if (digits > 16U) {
-    digits = 16U;
-  }
-
+  if (digits > maxDigits) digits = maxDigits;
+  if (digits > 16U) digits = 16U;
   for (uint8_t i = 0; i < digits; ++i) {
-    const uint8_t shift =
-        static_cast<uint8_t>((digits - 1U - i) * 4U);
-
-    const uint8_t nibble =
-        static_cast<uint8_t>((value >> shift) & 0x0FU);
-
+    const uint8_t shift = static_cast<uint8_t>((digits - 1U - i) * 4U);
+    const uint8_t nibble = static_cast<uint8_t>((value >> shift) & 0x0FU);
     out[i] = HEX_DIGITS[nibble];
   }
-
   out[digits] = '\0';
 }

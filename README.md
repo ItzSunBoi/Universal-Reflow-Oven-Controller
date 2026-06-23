@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.8
+# Universal Reflow Controller v1.8.1
 
 Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
@@ -10,7 +10,7 @@ Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
 The original dark Ocean UI layout, page order, three-button footer, mode-2 display transport, dirty-tile framebuffer, asynchronous button scanner, PWM backlight, inactivity dimming, and safety interlocks remain intact.
 
-## Changes in v1.8
+## Changes in v1.8.1
 
 ### Explicit local-browser OTA updates
 
@@ -51,8 +51,6 @@ Only colors change. Page geometry, control placement, ordering, and button behav
 Primary temperature readouts are horizontally centered and always show one decimal place. Temperature values elsewhere in profile and stage pages also use one decimal place.
 
 ## OTA workflow
-
-The first installation of v1.8 must be performed over USB so Arduino can write the included dual-slot partition table. An OTA application image cannot change the partition table itself. After that first USB installation, later v1.8-compatible releases can be installed through the browser workflow. Avoid enabling an "erase all flash" upload option if you want to retain NVS profiles and logs.
 
 1. Compile the project and export the application binary from Arduino IDE.
 2. On the controller, open `Menu -> Settings -> OTA update`.

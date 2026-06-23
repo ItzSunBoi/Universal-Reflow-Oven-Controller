@@ -83,7 +83,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.8");
+  Serial.println("Universal Reflow Controller v1.8.1");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
