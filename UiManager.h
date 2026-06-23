@@ -116,6 +116,7 @@ class UiManager {
   uint32_t lastInteractionMs_ = 0;
   uint32_t wakeEventGuardUntilMs_ = 0;
   BacklightState backlightState_ = BacklightState::ACTIVE;
+  bool lastOtaActive_ = false;
 
   uint16_t cBg_;
   uint16_t cPanel_;

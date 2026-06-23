@@ -1,8 +1,10 @@
 #include "OtaManager.h"
 
 #include <Update.h>
+#include <Preferences.h>
 #include <WiFi.h>
 #include <esp_ota_ops.h>
+#include <esp_heap_caps.h>
 #include <esp_system.h>
 
 #include <cstring>
@@ -11,6 +13,21 @@ OtaManager::OtaManager(HeaterController &heater) : heater_(heater) {}
 
 void OtaManager::begin() {
   configureRoutes();
+  bootResetReason_ = esp_reset_reason();
+
+  Preferences preferences;
+  if (preferences.begin("reflow_ota", false)) {
+    previousSessionInterrupted_ = preferences.getBool("active", false);
+    if (previousSessionInterrupted_) {
+      preferences.putBool("active", false);
+    }
+    preferences.end();
+  }
+
+  Serial.printf("Boot reset reason: %s (%d)%s\n",
+                resetReasonName(bootResetReason_),
+                static_cast<int>(bootResetReason_),
+                previousSessionInterrupted_ ? " during OTA session" : "");
 }
 
 bool OtaManager::start(uint32_t nowMs) {
@@ -41,14 +58,63 @@ bool OtaManager::start(uint32_t nowMs) {
   makeHex(csrfToken_, sizeof(csrfToken_),
           (static_cast<uint64_t>(randomA) << 32U) | randomB, 16);
 
-  WiFi.mode(WIFI_AP);
-  WiFi.setSleep(false);
+  freeHeapBeforeWifi_ = ESP.getFreeHeap();
+  freeHeapAfterWifi_ = 0;
+  const uint32_t largestBlockBeforeWifi =
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  Serial.printf("OTA start: free heap=%lu, largest block=%lu\n",
+                static_cast<unsigned long>(freeHeapBeforeWifi_),
+                static_cast<unsigned long>(largestBlockBeforeWifi));
+  if (freeHeapBeforeWifi_ < OTA_MIN_FREE_HEAP_BYTES ||
+      largestBlockBeforeWifi < OTA_MIN_LARGEST_HEAP_BLOCK_BYTES) {
+    setError("Not enough contiguous heap for Wi-Fi");
+    return false;
+  }
+
+  setSessionMarker(true);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_OFF);
+  delay(50);
+  if (!WiFi.mode(WIFI_AP)) {
+    setSessionMarker(false);
+    setError("Could not enable AP mode");
+    return false;
+  }
+  delay(OTA_WIFI_START_SETTLE_MS);
+
+  wifi_power_t txPower = WIFI_POWER_8_5dBm;
+  if (OTA_WIFI_TX_POWER_DBM <= 2) {
+    txPower = WIFI_POWER_2dBm;
+  } else if (OTA_WIFI_TX_POWER_DBM <= 5) {
+    txPower = WIFI_POWER_5dBm;
+  } else if (OTA_WIFI_TX_POWER_DBM <= 7) {
+    txPower = WIFI_POWER_7dBm;
+  } else if (OTA_WIFI_TX_POWER_DBM <= 9) {
+    txPower = WIFI_POWER_8_5dBm;
+  } else if (OTA_WIFI_TX_POWER_DBM <= 11) {
+    txPower = WIFI_POWER_11dBm;
+  } else {
+    txPower = WIFI_POWER_13dBm;
+  }
+  WiFi.setTxPower(txPower);
+
   if (!WiFi.softAP(ssid_, password_, OTA_WIFI_CHANNEL, false,
                    OTA_MAX_CLIENTS)) {
     WiFi.mode(WIFI_OFF);
+    setSessionMarker(false);
     setError("Could not start update Wi-Fi");
     return false;
   }
+  WiFi.setTxPower(txPower);
+  delay(OTA_WIFI_START_SETTLE_MS);
+
+  freeHeapAfterWifi_ = ESP.getFreeHeap();
+  Serial.printf("OTA AP ready: free heap=%lu, min heap=%lu, largest block=%lu, tx=%ddBm\n",
+                static_cast<unsigned long>(freeHeapAfterWifi_),
+                static_cast<unsigned long>(ESP.getMinFreeHeap()),
+                static_cast<unsigned long>(
+                    heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)),
+                static_cast<int>(OTA_WIFI_TX_POWER_DBM));
 
   const IPAddress ip = WiFi.softAPIP();
   snprintf(address_, sizeof(address_), "http://%u.%u.%u.%u",
@@ -65,6 +131,7 @@ void OtaManager::stop() {
   server_.stop();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_OFF);
+  setSessionMarker(false);
   heater_.forceOff();
   state_ = State::OFF;
   uploadStarted_ = false;
@@ -196,6 +263,7 @@ void OtaManager::handleUploadChunk() {
     progressPercent_ = 100;
     state_ = State::SUCCESS;
     strlcpy(detail_, "Update verified; restarting", sizeof(detail_));
+    setSessionMarker(false);
     restartPending_ = true;
     restartAtMs_ = millis() + OTA_RESTART_DELAY_MS;
     return;
@@ -279,4 +347,38 @@ void OtaManager::makeHex(char *out, size_t capacity, uint64_t value,
     out[i] = HEX_DIGITS[nibble];
   }
   out[digits] = '\0';
+}
+
+const char *OtaManager::bootResetReasonName() const {
+  return resetReasonName(bootResetReason_);
+}
+
+const char *OtaManager::resetReasonName(esp_reset_reason_t reason) {
+  switch (reason) {
+    case ESP_RST_POWERON: return "POWER ON";
+    case ESP_RST_EXT: return "EXTERNAL";
+    case ESP_RST_SW: return "SOFTWARE";
+    case ESP_RST_PANIC: return "PANIC";
+    case ESP_RST_INT_WDT: return "INT WDT";
+    case ESP_RST_TASK_WDT: return "TASK WDT";
+    case ESP_RST_WDT: return "WATCHDOG";
+    case ESP_RST_DEEPSLEEP: return "DEEP SLEEP";
+    case ESP_RST_BROWNOUT: return "BROWNOUT";
+    case ESP_RST_SDIO: return "SDIO";
+    case ESP_RST_USB: return "USB";
+    case ESP_RST_JTAG: return "JTAG";
+    case ESP_RST_EFUSE: return "EFUSE";
+    case ESP_RST_PWR_GLITCH: return "POWER GLITCH";
+    case ESP_RST_CPU_LOCKUP: return "CPU LOCKUP";
+    case ESP_RST_UNKNOWN:
+    default: return "UNKNOWN";
+  }
+}
+
+void OtaManager::setSessionMarker(bool active) {
+  Preferences preferences;
+  if (preferences.begin("reflow_ota", false)) {
+    preferences.putBool("active", active);
+    preferences.end();
+  }
 }

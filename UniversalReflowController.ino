@@ -1,4 +1,5 @@
 #include <Adafruit_GFX.h>
+
 #include <Adafruit_MAX31865.h>
 #include <SPI.h>
 
@@ -85,7 +86,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.9.1");
+  Serial.println("Universal Reflow Controller v1.9.2");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
@@ -101,6 +102,11 @@ void printStartupSummary() {
                 PIN_MAX31865_SDO, PIN_MAX31865_CS);
 #endif
   Serial.printf("Profiles loaded: %u\n", profileStore.profileCount());
+  Serial.printf("Reset reason: %s%s\n",
+                otaManager.bootResetReasonName(),
+                otaManager.previousSessionInterrupted()
+                    ? " (previous OTA session interrupted)"
+                    : "");
 }
 }  // namespace
 

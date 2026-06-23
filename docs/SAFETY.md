@@ -43,3 +43,12 @@ This only works as intended when the accessible disconnect removes power from th
 7. Run a low-temperature empty-oven test.
 8. Run a sacrificial-board test with an independent contact probe.
 9. Do not leave the oven unattended.
+
+
+## OTA safety
+
+- OTA can start only while the reflow engine is idle and PID autotune is inactive.
+- Heater demand is forced to zero for the complete OTA session.
+- Button cancellation is disabled while flash writing is in progress.
+- A firmware update does not replace the required thermal fuse, mains fuse, grounding, enclosure, or accessible mains disconnect.
+- Repeated Wi-Fi-start resets should be treated as a power-integrity fault until the reset reason and 3.3 V rail are verified. Do not disable brownout protection to conceal the symptom.

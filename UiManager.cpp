@@ -101,6 +101,7 @@ void UiManager::begin() {
   lastInteractionMs_ = millis();
   wakeEventGuardUntilMs_ = 0;
   backlightState_ = BacklightState::ACTIVE;
+  lastOtaActive_ = ota_.active();
   dirty_ = true;
 }
 
@@ -182,6 +183,14 @@ void UiManager::update(uint32_t nowMs) {
   }
 
   syncPageToRunState();
+
+  const bool otaActiveNow = ota_.active();
+  if (lastOtaActive_ && !otaActiveNow) {
+    restoreConfiguredBacklight();
+    dirty_ = true;
+  }
+  lastOtaActive_ = otaActiveNow;
+
   updateIdleBacklight(nowMs);
 
   // Do not spend SPI bandwidth redrawing an invisible idle screen. A wake
@@ -199,8 +208,12 @@ void UiManager::update(uint32_t nowMs) {
                            page_ == Page::OTA_UPDATE ||
                            page_ == Page::OTA_INFO ||
                            page_ == Page::FAULT_DETAIL;
+  const uint32_t refreshInterval =
+      (page_ == Page::OTA_UPDATE || page_ == Page::OTA_INFO)
+          ? OTA_UI_REFRESH_INTERVAL_MS
+          : UI_REFRESH_INTERVAL_MS;
   if (!dirty_ && (!dynamicPage ||
-                  (nowMs - lastDrawMs_) < UI_REFRESH_INTERVAL_MS)) {
+                  (nowMs - lastDrawMs_) < refreshInterval)) {
     return;
   }
 
@@ -1243,7 +1256,7 @@ void UiManager::drawSettings() {
     frame_.print(value);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
-  drawButtons("BACK", "CHANGE", "DOWN");
+  drawButtons("BACK", "SELECT", "DOWN");
 }
 
 void UiManager::drawPidAutotune(uint32_t nowMs) {
@@ -1414,11 +1427,18 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
 
   if (!ota_.active()) {
     drawPanel(12, 46, 216, 135, true, cBlue_);
-    drawCentered("Local browser update", 61, 2, cCyan_);
+    drawCentered("Local browser", 61, 2, cCyan_);
+    drawCentered("update", 78, 2, cCyan_);
     drawCentered("Wi-Fi is normally disabled", 101, 1, cMuted_);
     drawCentered("START creates a temporary AP", 122, 1, cMuted_);
-    drawCentered("Heater remains forced off", 148, 1, cYellow_);
-    drawCentered("Session closes after 10 minutes", 169, 1, cMuted_);
+    drawCentered("Heater remains forced off", 143, 1, cYellow_);
+    char resetLine[40];
+    snprintf(resetLine, sizeof(resetLine), "%s reset: %s",
+             ota_.previousSessionInterrupted() ? "OTA" : "Last",
+             ota_.bootResetReasonName());
+    drawCentered(resetLine, 164, 1,
+                 ota_.previousSessionInterrupted() ? cRed_ : cMuted_);
+    drawCentered("Session closes after 10 minutes", 181, 1, cMuted_);
     const bool canStart = engine_.state() == RunState::IDLE &&
                           !autotuner_.active();
     drawButtons("BACK", canStart ? "START" : "LOCKED", "BACK");
@@ -1460,7 +1480,14 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
              static_cast<unsigned long>(ota_.secondsRemaining(nowMs)));
     drawCentered(remaining, 131, 1, cMuted_);
   }
-  drawCentered(ota_.detail(), 177, 1,
+  char heapLine[40];
+  if (ota_.freeHeapAfterWifi() > 0) {
+    snprintf(heapLine, sizeof(heapLine), "Heap %luk (was %luk)",
+             static_cast<unsigned long>(ota_.freeHeapAfterWifi() / 1024UL),
+             static_cast<unsigned long>(ota_.freeHeapBeforeWifi() / 1024UL));
+    drawCentered(heapLine, 161, 1, cMuted_);
+  }
+  drawCentered(ota_.detail(), 180, 1,
                ota_.state() == OtaManager::State::ERROR ? cRed_ : cMuted_);
   if (ota_.uploading()) {
     drawButtons("LOCKED", "UPLOAD", "LOCKED");
@@ -1489,7 +1516,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.9.1", 79, 2, cText_);
+  drawCentered("Controller v1.9.2", 79, 2, cText_);
 
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);
@@ -2060,7 +2087,19 @@ void UiManager::handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs) {
                engine_.state() == RunState::IDLE && !autotuner_.active()) {
       engine_.abortRun();
       heater_.forceOff();
-      ota_.start(nowMs);
+      // Reduce display load before starting the radio. On a marginal 3.3 V
+      // rail, waiting until after softAP() succeeds is too late to reduce the
+      // Wi-Fi startup current transient.
+      const uint8_t otaBrightness =
+          min(profiles_.settings().backlightPercent,
+              static_cast<uint8_t>(OTA_BACKLIGHT_PERCENT));
+      backlight_.setPercent(otaBrightness);
+      backlightState_ = BacklightState::ACTIVE;
+      if (ota_.start(nowMs)) {
+        lastOtaActive_ = true;
+      } else {
+        restoreConfiguredBacklight();
+      }
     }
     return;
   }
@@ -2073,6 +2112,8 @@ void UiManager::handleOtaUpdate(const ButtonEvent &event, uint32_t nowMs) {
 
   if (isPress(event, ButtonId::LEFT) || isPress(event, ButtonId::RIGHT)) {
     ota_.stop();
+    restoreConfiguredBacklight();
+    lastOtaActive_ = false;
     cursor_ = 8;
     page_ = Page::SETTINGS;
   } else if (isPress(event, ButtonId::MIDDLE)) {
@@ -2086,6 +2127,8 @@ void UiManager::handleOtaInfo(const ButtonEvent &event) {
   } else if (isPress(event, ButtonId::MIDDLE)) {
     if (ota_.active() && !ota_.uploading()) {
       ota_.stop();
+      restoreConfiguredBacklight();
+      lastOtaActive_ = false;
       cursor_ = 8;
       page_ = Page::SETTINGS;
     } else {

@@ -71,3 +71,10 @@ Profiles and settings are stored in ESP32 NVS through Arduino `Preferences`. A s
 - Optional fan: group G
 
 No connector group is shared between different modules.
+
+
+## OTA stability path
+
+OTA is an explicit local SoftAP session. Before the radio starts, the firmware forces the heater off, reduces backlight load, checks total and contiguous internal heap, records a persistent session marker, and stages Wi-Fi startup. RF transmit power defaults to approximately 8.5 dBm.
+
+If the ESP32 resets before OTA is closed normally, the marker survives reboot. `esp_reset_reason()` is then shown on the OTA page and printed over Serial, allowing brownout, watchdog, panic, and power-glitch resets to be distinguished.

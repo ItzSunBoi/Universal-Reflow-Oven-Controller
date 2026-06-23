@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <WebServer.h>
+#include <esp_system.h>
 
 #include "Config.h"
 #include "HeaterController.h"
@@ -33,6 +34,10 @@ class OtaManager {
   const char *detail() const { return detail_; }
   uint8_t progressPercent() const { return progressPercent_; }
   uint32_t secondsRemaining(uint32_t nowMs) const;
+  const char *bootResetReasonName() const;
+  bool previousSessionInterrupted() const { return previousSessionInterrupted_; }
+  uint32_t freeHeapBeforeWifi() const { return freeHeapBeforeWifi_; }
+  uint32_t freeHeapAfterWifi() const { return freeHeapAfterWifi_; }
 
  private:
   HeaterController &heater_;
@@ -52,6 +57,10 @@ class OtaManager {
   uint32_t restartAtMs_ = 0;
   size_t uploadTotalBytes_ = 0;
   size_t uploadWrittenBytes_ = 0;
+  esp_reset_reason_t bootResetReason_ = ESP_RST_UNKNOWN;
+  bool previousSessionInterrupted_ = false;
+  uint32_t freeHeapBeforeWifi_ = 0;
+  uint32_t freeHeapAfterWifi_ = 0;
 
   void configureRoutes();
   void handleRoot();
@@ -63,4 +72,6 @@ class OtaManager {
   String buildUploadPage() const;
   static void makeHex(char *out, size_t capacity, uint64_t value,
                       uint8_t digits);
+  static const char *resetReasonName(esp_reset_reason_t reason);
+  static void setSessionMarker(bool active);
 };

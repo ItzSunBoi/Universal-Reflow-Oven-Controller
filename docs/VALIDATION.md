@@ -1,4 +1,4 @@
-# Validation notes for v1.9.1
+# Validation notes for v1.9.2
 
 ## Button contract audit
 
@@ -30,3 +30,12 @@ The page enum contains 24 pages, and every page has both a draw-switch case and 
 ## Hardware status
 
 The changes have not yet been compiled in the user's exact Arduino-ESP32 3.3.2 environment or tested on the physical panel. The code changes are limited to UI navigation, labels, and information pages; heater, sensor, NVS, OTA partition, and PID control algorithms are unchanged.
+
+
+## OTA v1.9.2 checks
+
+- `OtaManager.cpp` passed a C++17 warning-as-error syntax check against an Arduino-ESP32 API-shape harness including WiFi, WebServer, Update, Preferences, reset-reason, and heap APIs.
+- The OTA session marker is cleared on normal stop, AP-start failure, and successful image verification.
+- The only deliberate `ESP.restart()` remains the post-verification restart path.
+- UI backlight reduction now occurs before radio startup and is restored on failure or normal exit.
+- Physical SoftAP startup, browser upload, brownout behavior, and Arduino-ESP32 3.3.2 compilation still require testing on the target controller.

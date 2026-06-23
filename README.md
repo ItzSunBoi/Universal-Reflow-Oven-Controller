@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.9.1
+# Universal Reflow Controller v1.9.2
 
 Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
@@ -10,7 +10,7 @@ Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
 The original dark Ocean UI layout, page order, three-button footer, mode-2 display transport, dirty-tile framebuffer, asynchronous button scanner, PWM backlight, inactivity dimming, and safety interlocks remain intact.
 
-## Changes in v1.9.1
+## Changes in v1.9.2
 
 ### Button-function audit and fixes
 
@@ -186,7 +186,7 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 
 ## Main source files
 
-- `UniversalReflowController_v1_9_1.ino`: initialization and main control loop
+- `UniversalReflowController_v1_9_2.ino`: initialization and main control loop
 - `CslessST7789.*`: mode-2 no-CS display driver
 - `UiManager.*`: UI, themes, centered temperatures, OTA and autotune pages
 - `OtaManager.*`: temporary AP, browser upload, flash update, restart
@@ -199,3 +199,16 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 - `partitions.csv`: dual-application OTA partition table
 - `BUTTON_AUDIT.md`: page-by-page three-button behavior matrix
 - `tools/verify_button_contracts.py`: static regression audit for button mappings
+
+
+## OTA stability diagnostics (v1.9.2)
+
+The OTA access point now starts at reduced Wi-Fi transmit power, no longer
+forces Wi-Fi sleep off, stages radio initialization, checks free heap, and
+reduces backlight brightness while active. If the controller resets during an
+OTA session, the next OTA page displays the recorded reset reason such as
+`BROWNOUT`, `TASK WDT`, or `PANIC`. Serial output also reports free heap before
+and after Wi-Fi startup.
+
+If `BROWNOUT` or `POWER GLITCH` is reported, improve the 3.3 V supply and local
+decoupling rather than disabling the brownout detector.

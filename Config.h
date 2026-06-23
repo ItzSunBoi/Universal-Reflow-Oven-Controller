@@ -61,8 +61,8 @@ constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 // Initialize using the exact speed proven by the successful ESP32-S3 test,
 // then use a faster but conservative clock for full-screen UI transfers.
-constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
-constexpr uint32_t TFT_SPI_HZ = 10000000UL;
+constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
+constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
 // -----------------------------------------------------------------------------
 // Temperature sensor backend
@@ -115,11 +115,11 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = 21;  // Dedicated header group B
+constexpr int8_t PIN_BUZZER = -1;  // Dedicated header group B
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = 38;  // Dedicated connector group G
+constexpr int8_t PIN_COOLING_FAN = -1;  // Dedicated connector group G
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;
@@ -164,6 +164,22 @@ constexpr uint8_t OTA_WIFI_CHANNEL = 6;
 constexpr uint8_t OTA_MAX_CLIENTS = 1;
 constexpr uint32_t OTA_SESSION_TIMEOUT_MS = 10UL * 60UL * 1000UL;
 constexpr uint32_t OTA_RESTART_DELAY_MS = 1800UL;
+// Reduce RF peak current on custom carrier boards. 8 means the firmware maps
+// to the closest supported value, currently WIFI_POWER_8_5dBm.
+constexpr int8_t OTA_WIFI_TX_POWER_DBM = 8;
+// Short staged startup prevents AP creation from being mixed with other large
+// one-time allocations and gives the radio task time to settle.
+constexpr uint32_t OTA_WIFI_START_SETTLE_MS = 150UL;
+// Refuse to start Wi-Fi when too little internal heap remains. This avoids an
+// opaque panic/reboot caused by a failed radio-stack allocation.
+constexpr uint32_t OTA_MIN_FREE_HEAP_BYTES = 60000UL;
+// Wi-Fi also needs a sufficiently large contiguous internal allocation.
+constexpr uint32_t OTA_MIN_LARGEST_HEAP_BLOCK_BYTES = 32000UL;
+// OTA pages need only update their countdown/status about once per second.
+constexpr uint32_t OTA_UI_REFRESH_INTERVAL_MS = 1000UL;
+// Reduce display-backlight load while the radio is active. The user's saved
+// brightness is restored automatically when OTA closes.
+constexpr uint8_t OTA_BACKLIGHT_PERCENT = 35;
 
 constexpr uint32_t SSR_WINDOW_MS = 2000;
 constexpr uint32_t SSR_MIN_PULSE_MS = 100;
