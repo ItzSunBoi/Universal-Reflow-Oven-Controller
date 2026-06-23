@@ -16,7 +16,9 @@ This firmware controls a heating appliance and cannot make an unsafe mains desig
 
 - SSR commanded off before peripheral initialization.
 - Startup software inhibit remains active until peripheral setup completes.
-- MAX31865 fault detection and invalid-sample lockout.
+- Selected-sensor fault detection and invalid-sample lockout.
+- NTC open/short, invalid-resistance, invalid-temperature, and ADC-range detection.
+- MAX31865 fault detection remains available when that backend is selected.
 - Global 285 C ceiling.
 - Per-profile temperature ceiling.
 - Heater-response monitor.
@@ -37,6 +39,7 @@ This only works as intended when the accessible disconnect removes power from th
 3. Verify that unplugging or switching off the supply physically removes heater power.
 4. Use an isolated low-voltage load before connecting the heater.
 5. Confirm the temperature sensor remains accurate throughout the oven's operating range.
-6. Run a low-temperature empty-oven test.
-7. Run a sacrificial-board test with an independent contact probe.
-8. Do not leave the oven unattended.
+6. For NTC mode, independently verify several temperatures and confirm the probe, insulation, and cable are rated above the selected profile peak.
+7. Run a low-temperature empty-oven test.
+8. Run a sacrificial-board test with an independent contact probe.
+9. Do not leave the oven unattended.

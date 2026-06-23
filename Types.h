@@ -89,8 +89,12 @@ struct TemperatureReading {
   bool valid;
   float rawC;
   float filteredC;
+  float sensorResistanceOhms;
   uint16_t rawRtd;
+  uint16_t rawAdc;
+  uint16_t adcMilliVolts;
   uint8_t max31865Fault;
+  uint8_t ntcFault;
   uint32_t timestampMs;
 };
 

@@ -45,9 +45,11 @@ max31865_numwires_t configuredWireMode() {
 }
 
 void initializePeripheralPins() {
+#if !USE_NTC_100K_SENSOR
   // The TFT has no CS line. Only the MAX31865 CS needs an idle level.
   pinMode(PIN_MAX31865_CS, OUTPUT);
   digitalWrite(PIN_MAX31865_CS, HIGH);
+#endif
 
   // Keep the display control lines in benign states before bus startup.
   pinMode(PIN_TFT_DC, OUTPUT);
@@ -83,15 +85,21 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.8.1");
+  Serial.println("Universal Reflow Controller v1.9.0");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
                 static_cast<unsigned long>(TFT_INIT_SPI_HZ),
                 static_cast<unsigned long>(TFT_SPI_HZ));
-  Serial.printf("MAX31865 HSPI: CLK=%d SDI=%d SDO=%d CS=%d\n",
+#if USE_NTC_100K_SENSOR
+  Serial.printf("Temperature: 100k NTC on ADC GPIO%d, beta=%.0f, fixed=%.1f ohm\n",
+                PIN_NTC_ADC, NTC_BETA_COEFFICIENT_K,
+                NTC_FIXED_RESISTOR_OHMS);
+#else
+  Serial.printf("Temperature: MAX31865 HSPI CLK=%d SDI=%d SDO=%d CS=%d\n",
                 PIN_MAX31865_CLK, PIN_MAX31865_SDI,
                 PIN_MAX31865_SDO, PIN_MAX31865_CS);
+#endif
   Serial.printf("Profiles loaded: %u\n", profileStore.profileCount());
 }
 }  // namespace
@@ -118,10 +126,12 @@ void setup() {
   }
   backlight.off();
 
+#if !USE_NTC_100K_SENSOR
   // Independent physical buses are mandatory because the display is always
   // selected and would interpret MAX31865 clock edges as display traffic.
   max31865Spi.begin(PIN_MAX31865_CLK, PIN_MAX31865_SDO,
                     PIN_MAX31865_SDI, PIN_MAX31865_CS);
+#endif
 
   // This uses the exact configuration proven on the physical module:
   // no CS, SPI mode 2, COLMOD 0x05, INVON, NORON, then DISPON.
@@ -153,7 +163,7 @@ void setup() {
 
   if (!sensorStarted) {
     reflowEngine.triggerFault(FaultCode::SENSOR,
-                              "MAX31865 initialization failed");
+                              "Temperature sensor initialization failed");
   }
 
   printStartupSummary();

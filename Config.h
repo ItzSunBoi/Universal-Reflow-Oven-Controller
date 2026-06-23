@@ -5,7 +5,7 @@
 // -----------------------------------------------------------------------------
 // Target hardware: ESP32-S3-WROOM-1-N16, Arduino-ESP32 3.x
 // Display: 240x240 ST7789 module with NO exposed CS pin
-// Temperature: MAX31865 + PT100 on an independent SPI controller
+// Temperature: selectable MAX31865/PT100 or temporary 100 kOhm NTC backend
 // Heater: zero-cross AC SSR, time-proportioned output
 // -----------------------------------------------------------------------------
 
@@ -28,7 +28,7 @@
 //                       D provides SCK, MOSI, DC, and RESET)
 //   B     = optional buzzer
 //   C     = three-button control panel
-//   E     = MAX31865
+//   E     = selected temperature sensor backend
 //   F     = SSR interface
 //   G     = optional cooling fan
 //
@@ -61,8 +61,38 @@ constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 // Initialize using the exact speed proven by the successful ESP32-S3 test,
 // then use a faster but conservative clock for full-screen UI transfers.
-constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
-constexpr uint32_t TFT_SPI_HZ = 10000000UL;
+constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
+constexpr uint32_t TFT_SPI_HZ = 40000000UL;
+
+// -----------------------------------------------------------------------------
+// Temperature sensor backend
+// -----------------------------------------------------------------------------
+// Set to 1 for the temporary 100 kOhm NTC divider. Set back to 0 when the
+// MAX31865/PT100 is repaired or replaced. Both implementations remain compiled
+// into the project source; this flag only selects which backend is initialized.
+#define USE_NTC_100K_SENSOR 1
+
+// 100 kOhm NTC input. GPIO9 is ADC1-capable on ESP32-S3 and reuses the
+// MAX31865 SDO connector position while the MAX31865 backend is disabled.
+constexpr int8_t PIN_NTC_ADC = 9;
+constexpr float NTC_NOMINAL_OHMS = 100000.0f;
+constexpr float NTC_NOMINAL_TEMPERATURE_C = 25.0f;
+constexpr float NTC_BETA_COEFFICIENT_K = 3950.0f;
+
+// Recommended divider for the reflow range:
+//   3.3 V --- NTC --- ADC GPIO9 --- fixed resistor --- GND
+// Set NTC_IS_HIGH_SIDE=false for the opposite arrangement:
+//   3.3 V --- fixed resistor --- ADC GPIO9 --- NTC --- GND
+constexpr bool NTC_IS_HIGH_SIDE = true;
+constexpr float NTC_FIXED_RESISTOR_OHMS = 2200.0f;
+constexpr uint16_t NTC_DIVIDER_SUPPLY_MV = 3300;
+constexpr uint8_t NTC_ADC_RESOLUTION_BITS = 12;
+constexpr uint8_t NTC_ADC_SAMPLE_COUNT = 24;
+constexpr uint16_t NTC_ADC_MIN_VALID_MV = 15;
+constexpr uint16_t NTC_ADC_MAX_VALID_MV = 3075;
+constexpr float NTC_MIN_VALID_RESISTANCE_OHMS = 40.0f;
+constexpr float NTC_MAX_VALID_RESISTANCE_OHMS = 2000000.0f;
+constexpr float NTC_FILTER_ALPHA = 0.18f;
 
 // MAX31865 bus (HSPI).
 constexpr int8_t PIN_MAX31865_CLK = 8;   // Connector group E
@@ -85,11 +115,11 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = 21;  // Dedicated header group B
+constexpr int8_t PIN_BUZZER = -1;  // Dedicated header group B
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = 38;  // Dedicated connector group G
+constexpr int8_t PIN_COOLING_FAN = -1;  // Dedicated connector group G
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;
@@ -143,7 +173,7 @@ constexpr float GLOBAL_MAX_VALID_TEMPERATURE_C = 350.0f;
 constexpr uint8_t MAX_CONSECUTIVE_SENSOR_FAILURES = 3;
 
 constexpr uint8_t MAX_PROFILES = 8;
-constexpr uint8_t MAX_PROFILE_STAGES = 7;
+constexpr uint8_t MAX_PROFILE_STAGES = 10;
 constexpr uint8_t MAX_RUN_LOGS = 8;
 constexpr uint16_t PROFILE_STORE_VERSION = 4;
 
@@ -171,7 +201,21 @@ constexpr uint8_t fanOffLevel() {
   return FAN_ACTIVE_HIGH ? LOW : HIGH;
 }
 
+static_assert(USE_NTC_100K_SENSOR == 0 || USE_NTC_100K_SENSOR == 1,
+              "USE_NTC_100K_SENSOR must be 0 or 1");
 static_assert(PIN_SSR >= 0, "SSR pin must be configured");
+static_assert(PIN_NTC_ADC >= 1 && PIN_NTC_ADC <= 10,
+              "NTC ADC should use an ESP32-S3 ADC1 GPIO (1-10)");
+static_assert(NTC_FIXED_RESISTOR_OHMS > 0.0f,
+              "NTC divider resistor must be positive");
+static_assert(NTC_BETA_COEFFICIENT_K > 0.0f,
+              "NTC beta coefficient must be positive");
+static_assert(NTC_ADC_SAMPLE_COUNT > 0,
+              "NTC ADC sample count must be nonzero");
+static_assert(NTC_ADC_MIN_VALID_MV < NTC_ADC_MAX_VALID_MV,
+              "NTC ADC valid voltage range is inverted");
+static_assert(NTC_ADC_MAX_VALID_MV < NTC_DIVIDER_SUPPLY_MV,
+              "NTC maximum ADC voltage must be below divider supply");
 static_assert(PIN_TFT_SCK != PIN_MAX31865_CLK,
               "CS-less TFT and MAX31865 must use separate clock pins");
 static_assert(PIN_TFT_MOSI != PIN_MAX31865_SDI,

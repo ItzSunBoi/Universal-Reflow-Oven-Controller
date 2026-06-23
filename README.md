@@ -1,16 +1,39 @@
-# Universal Reflow Controller v1.8.1
+# Universal Reflow Controller v1.9.0
 
 Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
 - a 240x240 CS-less ST7789 display on dedicated FSPI;
-- a MAX31865/PT100 interface on dedicated HSPI;
+- a compile-time selectable MAX31865/PT100 or 100 kOhm NTC temperature backend;
 - a zero-cross AC SSR driven through an AO3400A;
 - three push buttons;
 - editable reflow profiles stored in ESP32 NVS flash.
 
 The original dark Ocean UI layout, page order, three-button footer, mode-2 display transport, dirty-tile framebuffer, asynchronous button scanner, PWM backlight, inactivity dimming, and safety interlocks remain intact.
 
-## Changes in v1.8.1
+## Changes in v1.9.0
+
+### Selectable temperature sensor backend
+
+`Config.h` now contains a single compile-time flag:
+
+```cpp
+#define USE_NTC_100K_SENSOR 1
+```
+
+- `1`: use a temporary 100 kOhm NTC thermistor on GPIO9.
+- `0`: use the original MAX31865/PT100 implementation on HSPI.
+
+The MAX31865 source code and configuration remain in the project. Switching back does not require restoring deleted files. The NTC backend supports configurable nominal resistance, nominal temperature, beta coefficient, fixed divider resistor, divider orientation, ADC averaging, filter strength, and open/short limits.
+
+The default NTC configuration is for a 100 kOhm B3950 sensor and this divider:
+
+```text
+3.3 V --- NTC --- GPIO9 --- 2.2 kOhm (0.1%) --- GND
+```
+
+Add approximately 100 nF from GPIO9 to GND near the ESP32. The divider must use 3.3 V, never the carrier's 5 V rail. Use only a thermistor probe rated for the actual oven temperature.
+
+## Features retained from v1.8.1
 
 ### Explicit local-browser OTA updates
 
@@ -98,7 +121,33 @@ The display has no exposed chip-select and is permanently selected, so it uses i
 
 The custom driver uses the proven configuration: SPI mode 2, no CS toggling, `COLMOD=0x05`, inversion on, normal mode on, then display on.
 
-## MAX31865 wiring
+## Temperature sensor wiring
+
+### Temporary 100 kOhm NTC mode
+
+With `USE_NTC_100K_SENSOR` set to `1`:
+
+| NTC divider node | ESP32-S3 |
+|---|---:|
+| Divider midpoint | GPIO9 |
+| Divider supply | Regulated 3.3 V |
+| Divider ground | GND |
+
+Default arrangement:
+
+```text
+3.3 V --- 100 kOhm NTC --- GPIO9 --- 2.2 kOhm fixed resistor --- GND
+                                      |
+                                    100 nF
+                                      |
+                                     GND
+```
+
+The NTC and fixed-resistor values are configured in `Config.h`. If your divider is reversed, set `NTC_IS_HIGH_SIDE` to `false`. Do not feed GPIO9 from a divider powered by 5 V.
+
+### MAX31865/PT100 mode
+
+Set `USE_NTC_100K_SENSOR` to `0`; the original MAX31865 backend is retained unchanged.
 
 | MAX31865 | ESP32-S3 |
 |---|---:|
@@ -131,12 +180,13 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 
 ## Main source files
 
-- `UniversalReflowController_v1_8.ino`: initialization and main control loop
+- `UniversalReflowController_v1_9.ino`: initialization and main control loop
 - `CslessST7789.*`: mode-2 no-CS display driver
 - `UiManager.*`: UI, themes, centered temperatures, OTA and autotune pages
 - `OtaManager.*`: temporary AP, browser upload, flash update, restart
 - `PidAutotuner.*`: bounded relay-feedback PID autotune
 - `ProfileStore.*`: profiles, settings, logs, CRC, and NVS migration
+- `TemperatureSensor.*`: selectable NTC or MAX31865 backend, filtering, calibration, and faults
 - `HeaterController.*`: PID and SSR time-proportioning output
 - `ReflowEngine.*`: stage execution and run logging
 - `ButtonInput.*`: asynchronous button scanner and event queue

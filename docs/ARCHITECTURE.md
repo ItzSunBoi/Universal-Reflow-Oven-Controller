@@ -7,7 +7,7 @@
 The main task performs:
 
 1. drain queued button events and update UI state
-2. sample the MAX31865 when due
+2. sample the selected NTC or MAX31865 backend when due
 3. update the reflow state machine and safety monitors
 4. persist completed run summaries
 5. update SSR time-proportioning output
@@ -45,12 +45,12 @@ The custom `CslessST7789` driver uses:
 - the initialization sequence proven on the physical display
 - a stride-aware `pushImage()` method for complete frames and dirty tiles
 
-The MAX31865 uses the separate HSPI controller because any traffic on a shared bus would also be interpreted by the permanently selected display.
+When the MAX31865 backend is selected, it uses the separate HSPI controller because any traffic on a shared bus would also be interpreted by the permanently selected display. In NTC mode, GPIO9 becomes an ADC1 input and HSPI is not started.
 
 ## Other modules
 
 - `Safety`: startup SSR inhibit and immediate software hard-off helper
-- `TemperatureSensor`: MAX31865 communication, filtering, calibration, and faults
+- `TemperatureSensor`: compile-time selectable MAX31865/PT100 or 100 kOhm NTC backend, filtering, calibration, and faults
 - `HeaterController`: PID and slow time-proportioned zero-cross SSR output
 - `ReflowEngine`: ramp/hold/cool state machine, graph history, and safety monitors
 - `ProfileStore`: CRC-protected NVS profiles, settings, and run summaries
@@ -64,7 +64,7 @@ Profiles and settings are stored in ESP32 NVS through Arduino `Preferences`. A s
 ## Connector isolation
 
 - Display: connector groups A and D
-- MAX31865: group E
+- Selected temperature sensor backend: group E
 - Buttons: group C
 - SSR: group F
 - Optional buzzer: group B

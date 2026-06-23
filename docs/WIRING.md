@@ -13,7 +13,7 @@ This map follows two rules:
 | B | 36, 3, 21, 47, 48, 46, 45 | Header group | Optional buzzer on GPIO21 |
 | C | 4, 5, 6, 42 | 5 V + GND | Three-button control panel |
 | D | 10, 11, 12, 41 | 5 V + GND | ST7789 SPI/control signals |
-| E | 8, 9, 18, 40 | 5 V + GND | MAX31865 |
+| E | 8, 9, 18, 40 | 5 V + GND | Selected temperature sensor backend |
 | F | 39, 17, 16, 15 | 5 V + GND | SSR interface on GPIO16 |
 | G | 1, 2, 7, 38 | 5 V + GND | Optional cooling fan on GPIO38 |
 
@@ -48,9 +48,29 @@ The module already contains the backlight power MOSFET, so GPIO13 only supplies 
 
 If the display module requires 5 V on VCC, power it from a suitable 5 V rail instead while retaining GPIO13 as the 3.3 V PWM control signal. Do not apply 5 V to ESP32 GPIOs.
 
-## MAX31865: connector group E
+## Temperature sensor: connector group E
 
-The MAX31865 uses its own HSPI controller because the CS-less display is permanently selected.
+### Temporary 100 kOhm NTC mode
+
+Set `USE_NTC_100K_SENSOR` to `1` in `Config.h`. GPIO9 becomes an ADC1 input and the MAX31865 SPI pins remain unused.
+
+Default divider:
+
+```text
+Regulated 3.3 V --- 100 kOhm NTC --- GPIO9 --- 2.2 kOhm 0.1% --- GND
+                                              |
+                                            100 nF
+                                              |
+                                             GND
+```
+
+The carrier exposes 5 V in group E, but the divider must be powered from regulated 3.3 V. Do not connect a 5 V-powered divider directly to GPIO9. Use a separate 3.3 V feed or a local 3.3 V regulator.
+
+GPIO8, GPIO18, and GPIO40 are unused in NTC mode. The sensor parameters and divider orientation are all editable in `Config.h`.
+
+### MAX31865/PT100 mode
+
+Set `USE_NTC_100K_SENSOR` to `0`. The MAX31865 then uses its own HSPI controller because the CS-less display is permanently selected.
 
 | MAX31865 pin | Carrier connection |
 |---|---:|

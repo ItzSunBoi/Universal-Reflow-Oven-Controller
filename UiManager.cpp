@@ -1223,7 +1223,7 @@ void UiManager::drawSettings() {
     frame_.print(value);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
-  drawButtons("BACK", "CHANGE", "DOWN");
+  drawButtons("BACK", "SELECT", "DOWN");
 }
 
 void UiManager::drawPidAutotune(uint32_t nowMs) {
@@ -1307,7 +1307,8 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
 
   if (!ota_.active()) {
     drawPanel(12, 46, 216, 135, true, cBlue_);
-    drawCentered("Local browser update", 61, 2, cCyan_);
+    drawCentered("Local browser", 61, 2, cCyan_);
+    drawCentered("update", 78, 2, cCyan_);
     drawCentered("Wi-Fi is normally disabled", 101, 1, cMuted_);
     drawCentered("START creates a temporary AP", 122, 1, cMuted_);
     drawCentered("Heater remains forced off", 148, 1, cYellow_);
@@ -1360,7 +1361,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.8.1", 79, 2, cText_);
+  drawCentered("Controller v1.9.0", 79, 2, cText_);
 
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);

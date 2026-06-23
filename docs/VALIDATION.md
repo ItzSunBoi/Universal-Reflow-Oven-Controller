@@ -12,7 +12,7 @@
 - `CslessST7789::pushImage()` supports cropped, stride-based RGB565 transfers.
 - Button scanning runs in a FreeRTOS task on core 0 with a thread-safe event queue.
 - The Arduino loop retains a cooperative button fallback if task creation fails.
-- The display and MAX31865 remain on separate SPI controllers and physical buses.
+- The display and MAX31865 remain on separate SPI controllers and physical buses when the MAX31865 backend is selected. NTC mode does not initialize HSPI.
 - NVS profile format remains unchanged, preserving existing profiles and settings.
 - Connector-group isolation remains unchanged.
 
@@ -28,3 +28,10 @@
 8. Complete heater, SSR, sensor, and thermal-safety commissioning with mains isolated first.
 
 The default thermal profiles and PID values remain starting templates and must be validated for the actual oven and solder paste.
+
+
+## v1.9 sensor backend checks
+
+- `TemperatureSensor.cpp` was compiled with warnings treated as errors for both `USE_NTC_100K_SENSOR=1` and `USE_NTC_100K_SENSOR=0`.
+- The NTC beta equation and both divider orientations were checked against generated reference points from 25 C through 285 C.
+- The MAX31865 implementation remains present and compile-selectable.
