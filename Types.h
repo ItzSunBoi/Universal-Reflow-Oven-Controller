@@ -33,7 +33,8 @@ struct SystemSettings {
   float temperatureOffsetC;
   bool buzzerEnabled;
   bool fanDuringCool;
-  uint8_t reserved[5];
+  uint8_t backlightPercent;
+  uint8_t reserved[4];
 };
 
 struct RunSummary {

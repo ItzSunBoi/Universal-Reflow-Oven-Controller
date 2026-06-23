@@ -16,23 +16,33 @@ This map treats each slash-separated pin group as one physical connector set. It
 
 GPIO3, GPIO45, and GPIO46 are intentionally unused because they are ESP32-S3 strapping pins. The design also leaves GPIO42, GPIO14, GPIO35, GPIO36, GPIO47, GPIO48, GPIO39, GPIO17, GPIO15, GPIO1, GPIO2, and GPIO7 available for later expansion.
 
-## ST7789 display: connector group D
+## ST7789 display — connector group D
 
-The display has no chip-select pin and uses its own FSPI controller.
-
-| Display pin | Carrier connection |
-|---|---:|
+| Display pin | ESP32-S3 connection |
+|---|---|
 | SCL | GPIO12 |
 | SDA | GPIO11 |
-| RES | GPIO10 |
 | DC | GPIO41 |
-| BLK | Tie to the display supply, subject to module voltage rating |
-| VCC | Connector supply only if the display module accepts it |
-| GND | GND |
+| BLK | GPIO10 PWM |
+| RES | Hardware reset, described below |
+| GND | Group D GND |
+| VCC | Group D supply only if the module is rated for it |
 
-Tying BLK to the display supply reduces the display to exactly four GPIO signals, allowing it to fit entirely on group D. Firmware backlight dimming is disabled by setting `PIN_TFT_BL = -1`.
+The module already contains the backlight power MOSFET, so GPIO10 drives BLK
+directly as a logic-level PWM signal. Do not add another power transistor unless
+the module documentation requires one.
 
-If the display is 3.3 V-only, do not feed it from the connector's 5 V rail. Add a local 3.3 V regulator or provide 3.3 V separately while retaining the four group-D signal wires.
+### Display reset without consuming another GPIO
+
+The preferred arrangement is to connect display `RES` to the ESP32 board's
+`EN`/reset signal, so both devices reset together. If EN is not available, use
+a local power-on reset: connect RES to 3.3 V through 10 kOhm and add 100 nF from
+RES to GND. Do not pull RES up to 5 V unless the exact display module explicitly
+states that the pin is 5 V tolerant. The firmware passes `-1` as the ST7789 reset
+pin and therefore does not drive RES.
+
+This leaves SCL, SDA, DC, and BLK as the four signals in group D; the display
+still consumes only one JST signal group.
 
 ## MAX31865: connector group E
 

@@ -22,3 +22,13 @@ This package has not been compiled against the user's exact installed Arduino-ES
 7. validate actual PCB temperature with an independent attached probe
 
 The default reflow profiles are safe starting templates, not a substitute for the solder-paste manufacturer's profile or component thermal limits.
+
+
+## v1.3 checks
+
+- GPIO10 is no longer used for TFT reset and is dedicated to BLK PWM.
+- `PIN_TFT_RST = -1`; initialization guards against calling `pinMode(-1)`.
+- Backlight begins off, then applies the NVS setting after the first UI draw.
+- Settings list scrolls to accommodate the new Backlight entry without moving
+  the existing header or bottom-button regions.
+- NVS structure size is preserved by repurposing one previously reserved byte.

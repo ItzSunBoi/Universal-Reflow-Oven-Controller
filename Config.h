@@ -25,14 +25,23 @@
 //
 // Allocation: A=E-stop, B=buzzer, C=buttons, D=TFT, E=MAX31865,
 // F=SSR, G=cooling fan. No active module spans multiple connector groups.
+//
+// TFT group D uses all four GPIOs: SCK, MOSI, DC, and PWM backlight. The
+// display RES pin is not driven by a GPIO; use the hardware reset wiring in
+// WIRING.md (preferred: RES tied to ESP32 EN, or an RC pull-up to 3.3 V).
 
 // ST7789 display bus (FSPI). The display is write-only, so MISO is unused.
 constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL; connector group D
 constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA; connector group D
 constexpr int8_t PIN_TFT_DC   = 41;  // Connector group D
-constexpr int8_t PIN_TFT_RST  = 10;  // Display RES; connector group D
-constexpr int8_t PIN_TFT_BL   = -1;  // BLK tied to display VCC to keep one JST set
+constexpr int8_t PIN_TFT_RST  = -1;  // Hardware reset; no GPIO consumed
+constexpr int8_t PIN_TFT_BL   = 10;  // PWM to module BLK MOSFET; group D
 constexpr bool TFT_BACKLIGHT_ACTIVE_HIGH = true;
+constexpr uint32_t TFT_BACKLIGHT_PWM_HZ = 20000UL;
+constexpr uint8_t TFT_BACKLIGHT_PWM_BITS = 10;
+constexpr uint8_t TFT_BACKLIGHT_DEFAULT_PERCENT = 80;
+constexpr uint8_t TFT_BACKLIGHT_MIN_PERCENT = 10;
+constexpr uint8_t TFT_BACKLIGHT_STEP_PERCENT = 10;
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 constexpr uint32_t TFT_SPI_HZ = 40000000UL;

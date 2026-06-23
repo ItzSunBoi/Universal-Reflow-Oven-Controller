@@ -62,6 +62,13 @@ A schema version mismatch or CRC failure restores the compiled factory profiles.
 - fixed bottom row of three button legends
 - original home, profile, running, complete, menu, manual, and fault page ordering
 
-## Carrier connector isolation in v1.2
+## Carrier connector isolation in v1.3
 
 The physical pin map is organized around the reused carrier PCB rather than conventional dev-board header order. The CS-less TFT occupies group D, the MAX31865 occupies group E, the three-button panel occupies group C, the E-stop occupies group A, and the SSR interface occupies group F. Optional buzzer and fan outputs use groups B and G respectively. This keeps every active module within one physical connector group.
+
+
+## Backlight control
+
+`BacklightController` owns GPIO10 and the Arduino-ESP32 LEDC channel. It applies
+the NVS brightness setting and provides a guaranteed off state during startup.
+The UI changes brightness immediately and then saves the selected percentage.

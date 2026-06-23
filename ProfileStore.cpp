@@ -37,6 +37,14 @@ bool ProfileStore::begin() {
     resetDefaults();
     return save();
   }
+
+  // v1.2 reserved this byte and initialized it to zero. Reusing that byte
+  // preserves the NVS database layout and existing custom profiles.
+  if (database_.settings.backlightPercent < TFT_BACKLIGHT_MIN_PERCENT ||
+      database_.settings.backlightPercent > 100U) {
+    database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
+    return save();
+  }
   return true;
 }
 
@@ -55,6 +63,7 @@ void ProfileStore::resetDefaults() {
   database_.settings.temperatureOffsetC = 0.0f;
   database_.settings.buzzerEnabled = true;
   database_.settings.fanDuringCool = true;
+  database_.settings.backlightPercent = TFT_BACKLIGHT_DEFAULT_PERCENT;
   createFactoryProfiles();
   database_.selectedIndex = 0;
   database_.crc32 = calculateCrc(database_);

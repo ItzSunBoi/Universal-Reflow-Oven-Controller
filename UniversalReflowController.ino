@@ -3,6 +3,7 @@
 #include <Adafruit_MAX31865.h>
 #include <SPI.h>
 
+#include "BacklightController.h"
 #include "ButtonInput.h"
 #include "Config.h"
 #include "HeaterController.h"
@@ -20,12 +21,13 @@ SPIClass max31865Spi(HSPI);
 // -1 tells the Adafruit ST7789 driver that the display has no controllable CS.
 Adafruit_ST7789 display(&displaySpi, -1, PIN_TFT_DC, PIN_TFT_RST);
 
+BacklightController backlight;
 ButtonInput buttons;
 ProfileStore profileStore;
 TemperatureSensor temperatureSensor(max31865Spi);
 HeaterController heater;
 ReflowEngine reflowEngine(heater);
-UiManager ui(display, profileStore, reflowEngine, temperatureSensor);
+UiManager ui(display, profileStore, reflowEngine, temperatureSensor, backlight);
 
 namespace {
 max31865_numwires_t configuredWireMode() {
@@ -45,8 +47,10 @@ void initializePeripheralPins() {
   // Keep the display control lines in benign states before bus startup.
   pinMode(PIN_TFT_DC, OUTPUT);
   digitalWrite(PIN_TFT_DC, HIGH);
-  pinMode(PIN_TFT_RST, OUTPUT);
-  digitalWrite(PIN_TFT_RST, HIGH);
+  if (PIN_TFT_RST >= 0) {
+    pinMode(PIN_TFT_RST, OUTPUT);
+    digitalWrite(PIN_TFT_RST, HIGH);
+  }
 }
 
 void updateCoolingFan() {
@@ -74,7 +78,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.2");
+  Serial.println("Universal Reflow Controller v1.3");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI: SCK=%d MOSI=%d CS=none DC=%d RST=%d\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST);
@@ -102,6 +106,13 @@ void setup() {
 
   initializePeripheralPins();
 
+  // Attach PWM before display startup and hold the backlight off. This avoids
+  // the bright white flash common while an ST7789 is being initialized.
+  if (!backlight.begin()) {
+    Serial.println("WARNING: TFT backlight PWM initialization failed");
+  }
+  backlight.off();
+
   // Independent physical buses are mandatory because the display is always
   // selected and would interpret MAX31865 clock edges as display traffic.
   displaySpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, -1);
@@ -114,12 +125,6 @@ void setup() {
   display.invertDisplay(TFT_INVERT_COLORS);
   display.fillScreen(ST77XX_BLACK);
 
-  if (PIN_TFT_BL >= 0) {
-    pinMode(PIN_TFT_BL, OUTPUT);
-    digitalWrite(PIN_TFT_BL,
-                 TFT_BACKLIGHT_ACTIVE_HIGH ? HIGH : LOW);
-  }
-
   profileStore.begin();
   temperatureSensor.setCalibrationOffset(
       profileStore.settings().temperatureOffsetC);
@@ -127,6 +132,8 @@ void setup() {
 
   buttons.begin();
   ui.begin();
+  ui.update(millis());
+  backlight.setPercent(profileStore.settings().backlightPercent);
 
   if (!sensorStarted) {
     reflowEngine.triggerFault(FaultCode::SENSOR,

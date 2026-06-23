@@ -38,8 +38,10 @@ float profilePeakTargetC(const ReflowProfile &profile) {
 }  // namespace
 
 UiManager::UiManager(Adafruit_ST7789 &display, ProfileStore &profiles,
-                     ReflowEngine &engine, TemperatureSensor &sensor)
-    : tft_(display), profiles_(profiles), engine_(engine), sensor_(sensor) {}
+                     ReflowEngine &engine, TemperatureSensor &sensor,
+                     BacklightController &backlight)
+    : tft_(display), profiles_(profiles), engine_(engine), sensor_(sensor),
+      backlight_(backlight) {}
 
 void UiManager::begin() {
   cBg_ = tft_.color565(10, 12, 18);
@@ -860,28 +862,35 @@ void UiManager::drawLogs() {
 void UiManager::drawSettings() {
   drawHeader("SETTINGS");
   static const char *items[] = {
-      "Button buzzer", "Fan during cool", "Reset profiles", "About", "Back"};
+      "Button buzzer", "Fan during cool", "Backlight", "Reset profiles",
+      "About", "Back"};
   constexpr uint8_t count = sizeof(items) / sizeof(items[0]);
   cursor_ = clampCursor(cursor_, count);
+  uint8_t first = 0;
+  if (cursor_ >= VISIBLE_EDIT_ROWS) first = cursor_ - VISIBLE_EDIT_ROWS + 1U;
 
-  for (uint8_t i = 0; i < count; ++i) {
-    const int16_t y = 44 + i * 32;
+  for (uint8_t row = 0; row < VISIBLE_EDIT_ROWS; ++row) {
+    const uint8_t i = first + row;
+    if (i >= count) break;
+    const int16_t y = 44 + row * 32;
     drawPanel(16, y, 208, 27, i == cursor_);
     tft_.setTextSize(1);
     tft_.setTextColor(cText_);
     tft_.setCursor(28, y + 9);
     tft_.print(items[i]);
 
-    const char *value = "";
-    if (i == 0) value = profiles_.settings().buzzerEnabled ? "ON" : "OFF";
-    if (i == 1) value = profiles_.settings().fanDuringCool ? "ON" : "OFF";
-    if (i == 2) value = "RESTORE";
-    if (i == 3) value = "OPEN";
-    if (i == 4) value = "DONE";
-    tft_.setTextColor(i == 2 ? cRed_ : (i == 4 ? cGreen_ : cMuted_));
+    char value[16] = "";
+    if (i == 0) strlcpy(value, profiles_.settings().buzzerEnabled ? "ON" : "OFF", sizeof(value));
+    if (i == 1) strlcpy(value, profiles_.settings().fanDuringCool ? "ON" : "OFF", sizeof(value));
+    if (i == 2) snprintf(value, sizeof(value), "%u%%", profiles_.settings().backlightPercent);
+    if (i == 3) strlcpy(value, "RESTORE", sizeof(value));
+    if (i == 4) strlcpy(value, "OPEN", sizeof(value));
+    if (i == 5) strlcpy(value, "DONE", sizeof(value));
+    tft_.setTextColor(i == 3 ? cRed_ : (i == 5 ? cGreen_ : cMuted_));
     tft_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
     tft_.print(value);
   }
+  drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "CHANGE", "DOWN");
 }
 
@@ -889,7 +898,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.2", 79, 2, cText_);
+  drawCentered("Controller v1.3", 79, 2, cText_);
 
   tft_.setTextSize(1);
   tft_.setTextColor(cMuted_);
@@ -1221,7 +1230,7 @@ void UiManager::handleLogs(const ButtonEvent &event) {
 }
 
 void UiManager::handleSettings(const ButtonEvent &event) {
-  constexpr uint8_t itemCount = 5;
+  constexpr uint8_t itemCount = 6;
   if (isPress(event, ButtonId::LEFT)) {
     cursor_ = 3;
     page_ = Page::MENU;
@@ -1237,15 +1246,25 @@ void UiManager::handleSettings(const ButtonEvent &event) {
         profiles_.settings().fanDuringCool = !profiles_.settings().fanDuringCool;
         profiles_.save();
         break;
-      case 2:
+      case 2: {
+        uint8_t brightness = profiles_.settings().backlightPercent;
+        brightness = static_cast<uint8_t>(brightness + TFT_BACKLIGHT_STEP_PERCENT);
+        if (brightness > 100U) brightness = TFT_BACKLIGHT_MIN_PERCENT;
+        profiles_.settings().backlightPercent = brightness;
+        backlight_.setPercent(brightness);
+        profiles_.save();
+        break;
+      }
+      case 3:
         profiles_.resetDefaults();
         profiles_.save();
         sensor_.setCalibrationOffset(profiles_.settings().temperatureOffsetC);
-        break;
-      case 3:
-        page_ = Page::ABOUT;
+        backlight_.setPercent(profiles_.settings().backlightPercent);
         break;
       case 4:
+        page_ = Page::ABOUT;
+        break;
+      case 5:
         cursor_ = 3;
         page_ = Page::MENU;
         break;

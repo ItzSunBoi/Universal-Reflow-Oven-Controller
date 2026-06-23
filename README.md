@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.2
+# Universal Reflow Controller v1.0
 
 Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 ST7789 SPI display, a MAX31865/PT100 temperature interface, three UI buttons, a dedicated normally-closed emergency-stop input, and a zero-cross AC SSR.
 
@@ -152,3 +152,14 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 - `ARCHITECTURE.md`: module, state-machine, storage, and UI design
 - `VALIDATION.md`: checks completed and real-hardware commissioning work remaining
 - `docs/ui_reference_v1.png`: original approved 240x240 visual reference
+
+
+## PWM backlight
+
+The display BLK input is driven from GPIO10 using the ESP32-S3 LEDC peripheral
+at 20 kHz with 10-bit duty resolution. Brightness is stored in NVS and can be
+changed from **Menu → Settings → Backlight** in 10% steps. The firmware starts
+with the backlight off and enables it only after the first UI frame is drawn.
+
+To keep the TFT on one four-signal JST connector, the display RES pin uses a
+hardware reset instead of a GPIO. See `WIRING.md`.

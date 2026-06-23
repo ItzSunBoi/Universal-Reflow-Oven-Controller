@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
 
+#include "BacklightController.h"
 #include "ButtonInput.h"
 #include "ProfileStore.h"
 #include "ReflowEngine.h"
@@ -11,7 +12,8 @@
 class UiManager {
  public:
   UiManager(Adafruit_ST7789 &display, ProfileStore &profiles,
-            ReflowEngine &engine, TemperatureSensor &sensor);
+            ReflowEngine &engine, TemperatureSensor &sensor,
+            BacklightController &backlight);
 
   void begin();
   void update(uint32_t nowMs);
@@ -59,6 +61,7 @@ class UiManager {
   ProfileStore &profiles_;
   ReflowEngine &engine_;
   TemperatureSensor &sensor_;
+  BacklightController &backlight_;
 
   Page page_ = Page::HOME;
   Page valueReturnPage_ = Page::PROFILE_EDIT;
