@@ -10,12 +10,12 @@ This map follows two rules:
 | Group | GPIO pins | Power available | Assigned module |
 |---|---|---|---|
 | A | 13, 14, 35 | 3.3 V + GND | ST7789 backlight and optional display power |
-| B | 36, 3, 21, 47, 48, 46, 45 | Header group | Optional buzzer on GPIO21 |
+| B | 36, 3, 21, 47, 48, 46, 45 | Header group | Unused by default; optional buzzer hardware location |
 | C | 4, 5, 6, 42 | 5 V + GND | Three-button control panel |
 | D | 10, 11, 12, 41 | 5 V + GND | ST7789 SPI/control signals |
 | E | 8, 9, 18, 40 | 5 V + GND | Selected temperature sensor backend |
 | F | 39, 17, 16, 15 | 5 V + GND | SSR interface on GPIO16 |
-| G | 1, 2, 7, 38 | 5 V + GND | Optional cooling fan on GPIO38 |
+| G | 1, 2, 7, 38 | 5 V + GND | Unused by default; optional cooling fan hardware location |
 
 GPIO3, GPIO45, and GPIO46 are intentionally unused because they are ESP32-S3 strapping pins.
 
@@ -83,7 +83,7 @@ Set `USE_NTC_100K_SENSOR` to `0`. The MAX31865 then uses its own HSPI controller
 | GND | GND |
 | 3V3 | Leave disconnected when it is a regulator output |
 
-Confirm whether the breakout's `3V3` pin is an output or input before powering it. Do not connect VIN and 3V3 together.
+Confirm whether the breakout's `3V3` pin is an output or input before powering it. Do not connect VIN and 3V3 together. The current fallback configuration is PT100, 4300 ohm reference, and 2-wire mode; those values must match the actual replacement hardware before MAX31865 mode is enabled.
 
 ## Three-button panel: connector group C
 
@@ -107,11 +107,11 @@ Use an appropriate transistor or optocoupler interface. Add a hardware pull-down
 
 ## Optional buzzer: group B
 
-The optional buzzer uses GPIO21. Set `PIN_BUZZER = -1` in `Config.h` if no buzzer is fitted. Group B is then unused and may be reassigned manually.
+The optional buzzer hardware location is GPIO21, but v1.9.3 sets `PIN_BUZZER = -1`, so no buzzer GPIO is initialized. Group B is unused unless the pin is deliberately re-enabled in `Config.h`.
 
 ## Optional cooling fan: group G
 
-The optional fan driver uses GPIO38. Use a MOSFET or relay driver and a flyback diode for an inductive fan or relay coil. Set `PIN_COOLING_FAN = -1` if unused.
+The optional fan hardware location is GPIO38, but v1.9.3 sets `PIN_COOLING_FAN = -1`, so no cooling-fan GPIO is initialized. Re-enable the pin only when a suitable MOSFET or relay driver is fitted; use a flyback diode for an inductive load.
 
 ## Emergency isolation
 

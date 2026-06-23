@@ -78,6 +78,12 @@ class UiManager {
     HELP,
   };
 
+  enum class TextAlign : uint8_t {
+    LEFT,
+    CENTER,
+    RIGHT,
+  };
+
   CslessST7789 &display_;
   GFXcanvas16 frame_;
   ProfileStore &profiles_;
@@ -168,6 +174,15 @@ class UiManager {
   void drawFaultDetail();
   void drawDeleteConfirm();
 
+  static uint8_t fitText(const char *text, char *output, size_t capacity,
+                         int16_t maxWidth, uint8_t preferredSize);
+  void drawFittedText(const char *text, int16_t x, int16_t y, int16_t width,
+                      int16_t height, uint8_t preferredSize, uint16_t color,
+                      TextAlign alignment = TextAlign::LEFT);
+  void drawWrappedText(const char *text, int16_t x, int16_t y, int16_t width,
+                       uint8_t maxLines, uint8_t size, uint16_t color,
+                       TextAlign alignment = TextAlign::LEFT,
+                       int16_t lineGap = 3);
   void drawHeader(const char *title, const char *status = nullptr,
                   uint16_t accent = 0);
   void drawButtons(const char *left, const char *middle, const char *right);

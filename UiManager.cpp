@@ -484,24 +484,128 @@ void UiManager::flushFrame(bool forceFullFrame) {
   frameValid_ = true;
 }
 
+uint8_t UiManager::fitText(const char *text, char *output, size_t capacity,
+                           int16_t maxWidth, uint8_t preferredSize) {
+  if (output == nullptr || capacity == 0) return 1;
+  const char *source = text != nullptr ? text : "";
+  strlcpy(output, source, capacity);
+
+  uint8_t size = preferredSize > 0 ? preferredSize : 1;
+  while (size > 1U &&
+         static_cast<int32_t>(strlen(output)) * 6 * size > maxWidth) {
+    --size;
+  }
+
+  const size_t maxChars = maxWidth > 0
+                              ? static_cast<size_t>(maxWidth / (6 * size))
+                              : 0U;
+  const size_t length = strlen(output);
+  if (length <= maxChars) return size;
+
+  if (maxChars == 0U) {
+    output[0] = '\0';
+  } else if (maxChars <= 3U) {
+    output[maxChars] = '\0';
+  } else {
+    output[maxChars - 3U] = '.';
+    output[maxChars - 2U] = '.';
+    output[maxChars - 1U] = '.';
+    output[maxChars] = '\0';
+  }
+  return size;
+}
+
+void UiManager::drawFittedText(const char *text, int16_t x, int16_t y,
+                               int16_t width, int16_t height,
+                               uint8_t preferredSize, uint16_t color,
+                               TextAlign alignment) {
+  char fitted[96];
+  const uint8_t size = fitText(text, fitted, sizeof(fitted), width,
+                               preferredSize);
+  const int16_t textWidth =
+      static_cast<int16_t>(strlen(fitted) * 6U * size);
+  int16_t cursorX = x;
+  if (alignment == TextAlign::CENTER) {
+    cursorX = x + (width - textWidth) / 2;
+  } else if (alignment == TextAlign::RIGHT) {
+    cursorX = x + width - textWidth;
+  }
+  const int16_t textHeight = static_cast<int16_t>(8U * size);
+  const int16_t cursorY = y + ((height - textHeight) > 0
+                                   ? (height - textHeight) / 2
+                                   : 0);
+
+  frame_.setTextSize(size);
+  frame_.setTextColor(color);
+  frame_.setCursor(cursorX, cursorY);
+  frame_.print(fitted);
+}
+
+void UiManager::drawWrappedText(const char *text, int16_t x, int16_t y,
+                                int16_t width, uint8_t maxLines,
+                                uint8_t size, uint16_t color,
+                                TextAlign alignment, int16_t lineGap) {
+  if (text == nullptr || maxLines == 0U || size == 0U || width <= 0) return;
+
+  char remaining[128];
+  strlcpy(remaining, text, sizeof(remaining));
+  char *cursor = remaining;
+  const size_t maxChars = static_cast<size_t>(width / (6 * size));
+  if (maxChars == 0U) return;
+
+  for (uint8_t lineIndex = 0; lineIndex < maxLines && *cursor != '\0';
+       ++lineIndex) {
+    while (*cursor == ' ') ++cursor;
+    if (*cursor == '\0') break;
+
+    char line[96];
+    const size_t remainingLength = strlen(cursor);
+    if (lineIndex + 1U == maxLines || remainingLength <= maxChars) {
+      fitText(cursor, line, sizeof(line), width, size);
+      cursor += remainingLength;
+    } else {
+      size_t split = maxChars;
+      while (split > 0U && cursor[split] != ' ') --split;
+      if (split == 0U) split = maxChars;
+      const size_t copyLength = split < sizeof(line) - 1U
+                                    ? split
+                                    : sizeof(line) - 1U;
+      memcpy(line, cursor, copyLength);
+      line[copyLength] = '\0';
+      size_t lineLength = strlen(line);
+      while (lineLength > 0U && line[lineLength - 1U] == ' ') {
+        line[--lineLength] = '\0';
+      }
+      cursor += split;
+    }
+
+    drawFittedText(line, x,
+                   y + lineIndex * (static_cast<int16_t>(8U * size) + lineGap),
+                   width, static_cast<int16_t>(8U * size), size, color,
+                   alignment);
+  }
+}
+
 void UiManager::drawHeader(const char *title, const char *status,
                            uint16_t accent) {
   frame_.fillRoundRect(6, 5, 228, 27, 8, cPanel_);
-  frame_.setTextSize(2);
-  frame_.setTextColor(cText_);
-  frame_.setCursor(14, 11);
-  frame_.print(title);
 
+  int16_t titleWidth = 212;
   if (status != nullptr) {
-    frame_.setTextSize(1);
-    const int16_t width = static_cast<int16_t>(strlen(status) * 6 + 12);
-    const int16_t x = 228 - width;
-    frame_.fillRoundRect(x, 10, width, 16, 6,
-                       accent == 0 ? cCyan_ : accent);
-    frame_.setTextColor(cBg_);
-    frame_.setCursor(x + 6, 14);
-    frame_.print(status);
+    char fittedStatus[32];
+    fitText(status, fittedStatus, sizeof(fittedStatus), 80, 1);
+    int16_t pillWidth = static_cast<int16_t>(strlen(fittedStatus) * 6 + 12);
+    if (pillWidth < 30) pillWidth = 30;
+    if (pillWidth > 92) pillWidth = 92;
+    const int16_t pillX = 228 - pillWidth;
+    frame_.fillRoundRect(pillX, 10, pillWidth, 16, 6,
+                         accent == 0 ? cCyan_ : accent);
+    drawFittedText(fittedStatus, pillX + 5, 10, pillWidth - 10, 16, 1, cBg_,
+                   TextAlign::CENTER);
+    titleWidth = pillX - 20;
   }
+
+  drawFittedText(title, 14, 7, titleWidth, 23, 2, cText_, TextAlign::LEFT);
 }
 
 void UiManager::drawButtons(const char *left, const char *middle,
@@ -511,11 +615,8 @@ void UiManager::drawButtons(const char *left, const char *middle,
   for (uint8_t i = 0; i < 3; ++i) {
     frame_.fillRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cPanel2_);
     frame_.drawRoundRect(xs[i], BUTTON_Y, 72, 20, 6, cLine_);
-    frame_.setTextSize(1);
-    frame_.setTextColor(cText_);
-    const int16_t textWidth = static_cast<int16_t>(strlen(labels[i]) * 6);
-    frame_.setCursor(xs[i] + (72 - textWidth) / 2, BUTTON_Y + 6);
-    frame_.print(labels[i]);
+    drawFittedText(labels[i], xs[i] + 4, BUTTON_Y, 64, 20, 1, cText_,
+                   TextAlign::CENTER);
   }
 }
 
@@ -532,11 +633,9 @@ void UiManager::drawPanel(int16_t x, int16_t y, int16_t w, int16_t h,
 
 void UiManager::drawCentered(const char *text, int16_t y, uint8_t size,
                              uint16_t color) {
-  frame_.setTextSize(size);
-  frame_.setTextColor(color);
-  const int16_t textWidth = static_cast<int16_t>(strlen(text) * 6 * size);
-  frame_.setCursor((SCREEN_W - textWidth) / 2, y);
-  frame_.print(text);
+  drawFittedText(text, 6, y, SCREEN_W - 12,
+                 static_cast<int16_t>(8U * size), size, color,
+                 TextAlign::CENTER);
 }
 
 void UiManager::drawTemperature(float temperatureC, int16_t centerX,
@@ -587,15 +686,12 @@ void UiManager::drawListRow(int16_t y, const char *primary,
                             const char *secondary, bool selected,
                             uint16_t dotColor) {
   drawPanel(12, y, 216, 44, selected, selected ? cCyan_ : 0);
-  frame_.setTextColor(cText_);
-  frame_.setTextSize(2);
-  frame_.setCursor(24, y + 7);
-  frame_.print(primary);
+  const int16_t textWidth = dotColor != 0 ? 169 : 192;
+  drawFittedText(primary, 24, y + 4, textWidth, 23, 2, cText_,
+                 TextAlign::LEFT);
   if (secondary != nullptr) {
-    frame_.setTextColor(cMuted_);
-    frame_.setTextSize(1);
-    frame_.setCursor(24, y + 29);
-    frame_.print(secondary);
+    drawFittedText(secondary, 24, y + 26, textWidth, 15, 1, cMuted_,
+                   TextAlign::LEFT);
   }
   if (dotColor != 0) {
     frame_.fillCircle(205, y + 21, 7, dotColor);
@@ -721,19 +817,15 @@ void UiManager::drawHome() {
   frame_.print("Selected profile");
 
   const ReflowProfile &profile = profiles_.selectedProfile();
-  frame_.setTextSize(2);
-  frame_.setTextColor(cText_);
-  frame_.setCursor(24, 164);
-  frame_.print(profile.name);
+  drawFittedText(profile.name, 24, 158, 192, 27, 2, cText_,
+                 TextAlign::LEFT);
 
   char detail[48];
   snprintf(detail, sizeof(detail), "Peak %.1fC   TAL %us",
            profilePeakTargetC(profile),
            profile.targetTimeAboveLiquidusS);
-  frame_.setTextSize(1);
-  frame_.setTextColor(cYellow_);
-  frame_.setCursor(24, 191);
-  frame_.print(detail);
+  drawFittedText(detail, 24, 187, 192, 16, 1, cYellow_,
+                 TextAlign::LEFT);
 
   drawButtons("PROFILE", ready ? "START" : "LOCKED", "MENU");
 }
@@ -828,11 +920,6 @@ void UiManager::drawProfileEdit() {
     if (index >= itemCount) break;
     const int16_t y = 44 + row * 32;
     drawPanel(12, y, 216, 27, index == cursor_);
-    frame_.setTextSize(1);
-    frame_.setTextColor(index == cursor_ ? cText_ : cMuted_);
-    frame_.setCursor(23, y + 9);
-    frame_.print(labels[index]);
-
     char value[32] = "";
     switch (index) {
       case 0: strlcpy(value, editProfile_.name, sizeof(value)); break;
@@ -844,10 +931,12 @@ void UiManager::drawProfileEdit() {
       case 6: strlcpy(value, profiles_.profileCount() > 1 ? "Available" : "Locked", sizeof(value)); break;
       case 7: strlcpy(value, "Save", sizeof(value)); break;
     }
-    const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6);
-    frame_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
-    frame_.setCursor(216 - valueWidth, y + 9);
-    frame_.print(value);
+    const int16_t valueX = index == 0 ? 96 : 142;
+    drawFittedText(labels[index], 23, y, valueX - 29, 27, 1,
+                   index == cursor_ ? cText_ : cMuted_, TextAlign::LEFT);
+    drawFittedText(value, valueX, y, 216 - valueX, 27, 1,
+                   index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_),
+                   TextAlign::RIGHT);
   }
   drawScrollIndicator(itemCount, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "OPEN", "DOWN");
@@ -898,11 +987,6 @@ void UiManager::drawStageEdit() {
     if (index >= itemCount) break;
     const int16_t y = 44 + row * 32;
     drawPanel(12, y, 216, 27, index == cursor_);
-    frame_.setTextSize(1);
-    frame_.setTextColor(index == cursor_ ? cText_ : cMuted_);
-    frame_.setCursor(23, y + 9);
-    frame_.print(labels[index]);
-
     char value[32] = "";
     switch (index) {
       case 0: strlcpy(value, stage.name, sizeof(value)); break;
@@ -914,10 +998,12 @@ void UiManager::drawStageEdit() {
       case 6: strlcpy(value, editProfile_.stageCount > 1 ? "Delete" : "Locked", sizeof(value)); break;
       case 7: strlcpy(value, "Done", sizeof(value)); break;
     }
-    const int16_t valueWidth = static_cast<int16_t>(strlen(value) * 6);
-    frame_.setTextColor(index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_));
-    frame_.setCursor(216 - valueWidth, y + 9);
-    frame_.print(value);
+    const int16_t valueX = index == 0 ? 96 : 142;
+    drawFittedText(labels[index], 23, y, valueX - 29, 27, 1,
+                   index == cursor_ ? cText_ : cMuted_, TextAlign::LEFT);
+    drawFittedText(value, valueX, y, 216 - valueX, 27, 1,
+                   index == 6 ? cRed_ : (index == 7 ? cGreen_ : cText_),
+                   TextAlign::RIGHT);
   }
   drawScrollIndicator(itemCount, first, VISIBLE_EDIT_ROWS);
   drawButtons("BACK", "OPEN", "DOWN");
@@ -960,11 +1046,18 @@ void UiManager::drawNameEdit() {
   drawHeader(nameKind_ == NameKind::PROFILE ? "PROFILE NAME" : "STAGE NAME");
   drawPanel(12, 48, 216, 84, true, cPurple_);
   char *buffer = activeNameBuffer();
-  drawCentered(buffer, 75, 2, cText_);
+  char fittedName[32];
+  const uint8_t nameSize = fitText(buffer, fittedName, sizeof(fittedName),
+                                   196, 2);
+  drawFittedText(fittedName, 22, 64, 196, 36, nameSize, cText_,
+                 TextAlign::CENTER);
 
-  const int16_t charX = 120 - static_cast<int16_t>(strlen(buffer) * 6 * 2) / 2 +
-                        nameCursor_ * 12;
-  frame_.drawFastHLine(charX, 98, 10, cPurple_);
+  const int16_t textWidth =
+      static_cast<int16_t>(strlen(fittedName) * 6U * nameSize);
+  const int16_t charX = 22 + (196 - textWidth) / 2 +
+                        nameCursor_ * static_cast<int16_t>(6U * nameSize);
+  frame_.drawFastHLine(charX, 101,
+                       static_cast<int16_t>(6U * nameSize - 2U), cPurple_);
   frame_.setTextSize(1);
   frame_.setTextColor(cMuted_);
   frame_.setCursor(18, 148);
@@ -1017,7 +1110,7 @@ void UiManager::drawRunning(uint32_t nowMs) {
 }
 
 void UiManager::drawRunInfo(uint32_t nowMs) {
-  drawHeader("RUN DETAILS", engine_.stageName(), cYellow_);
+  drawHeader("RUN INFO", engine_.stageName(), cYellow_);
   const ReflowProfile &profile = engine_.activeProfile();
   const ReflowStage &stage = profile.stages[engine_.stageIndex() < (profile.stageCount - 1U)
                             ? engine_.stageIndex()
@@ -1029,9 +1122,8 @@ void UiManager::drawRunInfo(uint32_t nowMs) {
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 54);
   frame_.print("Profile");
-  frame_.setTextColor(cText_);
-  frame_.setCursor(92, 54);
-  frame_.print(profile.name);
+  drawFittedText(profile.name, 92, 49, 126, 18, 1, cText_,
+                 TextAlign::LEFT);
 
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 76);
@@ -1163,16 +1255,14 @@ void UiManager::drawLogs() {
   const uint8_t count = profiles_.runLogCount();
   if (count == 0) {
     drawPanel(12, 50, 216, 116);
-    drawCentered("No completed runs", 88, 2, cMuted_);
+    drawCentered("No run logs", 88, 2, cMuted_);
     drawCentered("Logs appear after reflow", 122, 1, cMuted_);
   } else {
     logCursor_ = clampCursor(logCursor_, count);
     const RunSummary &log = profiles_.runLogNewest(logCursor_);
     drawPanel(12, 43, 216, 154);
-    frame_.setTextSize(2);
-    frame_.setTextColor(cText_);
-    frame_.setCursor(22, 54);
-    frame_.print(log.profileName);
+    drawFittedText(log.profileName, 22, 49, 196, 28, 2, cText_,
+                   TextAlign::LEFT);
 
     char line[48];
     snprintf(line, sizeof(line), "Peak %.1f C", log.peakTemperatureC);
@@ -1210,11 +1300,6 @@ void UiManager::drawSettings() {
     if (i >= count) break;
     const int16_t y = 44 + row * 32;
     drawPanel(16, y, 208, 27, i == cursor_);
-    frame_.setTextSize(1);
-    frame_.setTextColor(cText_);
-    frame_.setCursor(28, y + 9);
-    frame_.print(items[i]);
-
     char value[18] = "";
     if (i == 0) {
       strlcpy(value, profiles_.settings().buzzerEnabled ? "ON" : "OFF",
@@ -1251,12 +1336,13 @@ void UiManager::drawSettings() {
 
     const bool destructive = i == 9;
     const bool done = i == 11;
-    frame_.setTextColor(destructive ? cRed_ : (done ? cGreen_ : cMuted_));
-    frame_.setCursor(208 - static_cast<int16_t>(strlen(value) * 6), y + 9);
-    frame_.print(value);
+    drawFittedText(items[i], 28, y, 126, 27, 1, cText_, TextAlign::LEFT);
+    drawFittedText(value, 160, y, 48, 27, 1,
+                   destructive ? cRed_ : (done ? cGreen_ : cMuted_),
+                   TextAlign::RIGHT);
   }
   drawScrollIndicator(count, first, VISIBLE_EDIT_ROWS);
-  drawButtons("BACK", "SELECT", "DOWN");
+  drawButtons("BACK", "CHANGE", "DOWN");
 }
 
 void UiManager::drawPidAutotune(uint32_t nowMs) {
@@ -1300,7 +1386,8 @@ void UiManager::drawPidAutotune(uint32_t nowMs) {
   if (failed) {
     drawPanel(12, 48, 216, 122, true, cRed_);
     drawCentered(autotuner_.stateName(), 61, 3, cRed_);
-    drawCentered(autotuner_.detail(), 112, 1, cText_);
+    drawWrappedText(autotuner_.detail(), 22, 108, 196, 2, 1, cText_,
+                    TextAlign::CENTER);
     drawCentered("Heater is off", 142, 1, cYellow_);
     drawButtons("BACK", "RESET", "AGAIN");
     return;
@@ -1328,7 +1415,8 @@ void UiManager::drawPidAutotune(uint32_t nowMs) {
   snprintf(line, sizeof(line), "Relay output %.0f%%",
            autotuner_.demandPercent());
   drawCentered(line, 153, 1, cOrange_);
-  drawCentered(autotuner_.detail(), 175, 1, cMuted_);
+  drawFittedText(autotuner_.detail(), 20, 170, 200, 15, 1, cMuted_,
+                 TextAlign::CENTER);
   drawProgress(20, 194, 200, 10,
                static_cast<float>(autotuner_.completedCycles()) /
                    autotuner_.requiredCycles(),
@@ -1340,7 +1428,7 @@ void UiManager::drawPidAutotune(uint32_t nowMs) {
 void UiManager::drawPidAutotuneInfo(uint32_t nowMs) {
   (void)nowMs;
   const bool diagnostics = pidInfoView_ == PidInfoView::DIAGNOSTICS;
-  drawHeader(diagnostics ? "TUNE DETAILS" : "AUTOTUNE INFO",
+  drawHeader(diagnostics ? "TUNE DETAILS" : "TUNE INFO",
              autotuner_.stateName(),
              autotuner_.failed() ? cRed_ : cYellow_);
 
@@ -1410,7 +1498,8 @@ void UiManager::drawPidAutotuneInfo(uint32_t nowMs) {
     frame_.setCursor(114, 168);
     frame_.print(line);
   } else {
-    drawCentered("Relay-feedback tuning", 54, 2, cPurple_);
+    drawFittedText("Relay PID tuning", 22, 50, 196, 24, 2, cPurple_,
+                   TextAlign::CENTER);
     drawCentered("The heater cycles around", 91, 1, cText_);
     drawCentered("the selected target.", 108, 1, cText_);
     drawCentered("Six cycles estimate Kp,", 132, 1, cMuted_);
@@ -1426,9 +1515,9 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
              ota_.state() == OtaManager::State::ERROR ? cRed_ : cGreen_);
 
   if (!ota_.active()) {
-    drawPanel(12, 46, 216, 135, true, cBlue_);
-    drawCentered("Local browser", 61, 2, cCyan_);
-    drawCentered("update", 78, 2, cCyan_);
+    drawPanel(12, 46, 216, 154, true, cBlue_);
+    drawFittedText("Browser update", 22, 57, 196, 24, 2, cCyan_,
+                   TextAlign::CENTER);
     drawCentered("Wi-Fi is normally disabled", 101, 1, cMuted_);
     drawCentered("START creates a temporary AP", 122, 1, cMuted_);
     drawCentered("Heater remains forced off", 143, 1, cYellow_);
@@ -1450,30 +1539,27 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 51);
   frame_.print("Wi-Fi");
-  frame_.setTextColor(cText_);
-  frame_.setCursor(78, 51);
-  frame_.print(ota_.ssid());
+  drawFittedText(ota_.ssid(), 78, 47, 140, 16, 1, cText_,
+                 TextAlign::LEFT);
 
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 75);
   frame_.print("Password");
-  frame_.setTextColor(cYellow_);
-  frame_.setCursor(78, 75);
-  frame_.print(ota_.password());
+  drawFittedText(ota_.password(), 78, 71, 140, 16, 1, cYellow_,
+                 TextAlign::LEFT);
 
   frame_.setTextColor(cMuted_);
   frame_.setCursor(22, 99);
   frame_.print("Open");
-  frame_.setTextColor(cCyan_);
-  frame_.setCursor(78, 99);
-  frame_.print(ota_.address());
+  drawFittedText(ota_.address(), 78, 95, 140, 16, 1, cCyan_,
+                 TextAlign::LEFT);
 
   if (ota_.uploading() || ota_.state() == OtaManager::State::SUCCESS) {
     drawProgress(22, 126, 196, 14, ota_.progressPercent() / 100.0f,
                  cGreen_);
     char progress[24];
     snprintf(progress, sizeof(progress), "%u%%", ota_.progressPercent());
-    drawCentered(progress, 147, 2, cText_);
+    drawCentered(progress, 143, 2, cText_);
   } else {
     char remaining[32];
     snprintf(remaining, sizeof(remaining), "Closes in %lus",
@@ -1485,10 +1571,11 @@ void UiManager::drawOtaUpdate(uint32_t nowMs) {
     snprintf(heapLine, sizeof(heapLine), "Heap %luk (was %luk)",
              static_cast<unsigned long>(ota_.freeHeapAfterWifi() / 1024UL),
              static_cast<unsigned long>(ota_.freeHeapBeforeWifi() / 1024UL));
-    drawCentered(heapLine, 161, 1, cMuted_);
+    drawCentered(heapLine, 164, 1, cMuted_);
   }
-  drawCentered(ota_.detail(), 180, 1,
-               ota_.state() == OtaManager::State::ERROR ? cRed_ : cMuted_);
+  drawFittedText(ota_.detail(), 20, 181, 200, 14, 1,
+                 ota_.state() == OtaManager::State::ERROR ? cRed_ : cMuted_,
+                 TextAlign::CENTER);
   if (ota_.uploading()) {
     drawButtons("LOCKED", "UPLOAD", "LOCKED");
   } else {
@@ -1501,7 +1588,8 @@ void UiManager::drawOtaInfo(uint32_t nowMs) {
   (void)nowMs;
   drawHeader("OTA HELP", ota_.stateName(), cBlue_);
   drawPanel(12, 43, 216, 157, true, cBlue_);
-  drawCentered("Upload the application BIN", 56, 2, cCyan_);
+  drawFittedText("Upload firmware", 22, 52, 196, 24, 2, cCyan_,
+                 TextAlign::CENTER);
   drawCentered("Use the plain .ino.bin file", 91, 1, cText_);
   drawCentered("Do not upload ZIP, bootloader,", 112, 1, cMuted_);
   drawCentered("partitions or merged images.", 129, 1, cMuted_);
@@ -1516,23 +1604,21 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.9.2", 79, 2, cText_);
+  drawCentered("Controller 1.9.3", 79, 2, cText_);
 
-  frame_.setTextSize(1);
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 113);
-  frame_.print("ESP32-S3-WROOM-1-N16");
-  frame_.setCursor(22, 132);
+  drawFittedText("ESP32-S3-WROOM-1-N16", 22, 107, 196, 16, 1, cMuted_,
+                 TextAlign::LEFT);
 #if USE_NTC_100K_SENSOR
-  frame_.print("ST7789 240x240 + 100k NTC");
+  drawFittedText("ST7789 240x240 + 100k NTC", 22, 126, 196, 16, 1,
+                 cMuted_, TextAlign::LEFT);
 #else
-  frame_.print("ST7789 240x240 + MAX31865");
+  drawFittedText("ST7789 240x240 + MAX31865", 22, 126, 196, 16, 1,
+                 cMuted_, TextAlign::LEFT);
 #endif
-  frame_.setCursor(22, 151);
-  frame_.print("Profiles stored in NVS flash");
-  frame_.setTextColor(cYellow_);
-  frame_.setCursor(22, 178);
-  frame_.print("Use a thermal fuse and enclosure");
+  drawFittedText("Profiles stored in NVS flash", 22, 145, 196, 16, 1,
+                 cMuted_, TextAlign::LEFT);
+  drawFittedText("Use a thermal fuse and enclosure", 22, 172, 196, 16, 1,
+                 cYellow_, TextAlign::LEFT);
   drawButtons("BACK", "HOME", "BACK");
 }
 
@@ -1542,75 +1628,60 @@ void UiManager::drawFault() {
   frame_.drawRoundRect(12, 45, 216, 129, 14, cRed_);
   drawCentered("!", 55, 6, cRed_);
   drawCentered(faultCodeName(engine_.faultCode()), 117, 1, cText_);
-  drawCentered(engine_.faultDetail(), 139, 1, cMuted_);
+  drawWrappedText(engine_.faultDetail(), 22, 136, 196, 2, 1, cMuted_,
+                  TextAlign::CENTER);
 
-  frame_.setTextSize(1);
-  frame_.setTextColor(cYellow_);
-  frame_.setCursor(22, 187);
-  frame_.print("Hold RESET to clear fault");
+  drawFittedText("Hold RESET to clear fault", 22, 183, 196, 16, 1,
+                 cYellow_, TextAlign::LEFT);
   drawButtons("HOME", "DETAIL", "HOLD RST");
 }
 
 
 void UiManager::drawFaultDetail() {
-  drawHeader("FAULT DETAILS", "HEATER OFF", cRed_);
+  drawHeader("FAULT INFO", "HEATER OFF", cRed_);
   drawPanel(12, 42, 216, 159, true, cRed_);
 
   char line[48];
   const TemperatureReading reading = sensor_.reading();
-  frame_.setTextSize(1);
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 53);
-  frame_.print("Fault");
-  frame_.setTextColor(cRed_);
-  frame_.setCursor(82, 53);
-  frame_.print(faultCodeName(engine_.faultCode()));
 
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 76);
-  frame_.print("Detail");
-  frame_.setTextColor(cText_);
-  frame_.setCursor(82, 76);
-  frame_.print(engine_.faultDetail());
+  drawFittedText("Fault", 22, 49, 54, 16, 1, cMuted_, TextAlign::LEFT);
+  drawFittedText(faultCodeName(engine_.faultCode()), 82, 49, 136, 16, 1,
+                 cRed_, TextAlign::LEFT);
 
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 103);
-  frame_.print("Sensor");
-  frame_.setTextColor(reading.valid ? cGreen_ : cRed_);
-  frame_.setCursor(82, 103);
-  frame_.print(reading.valid ? "VALID" : "INVALID");
+  drawFittedText("Detail", 22, 72, 54, 16, 1, cMuted_, TextAlign::LEFT);
+  drawWrappedText(engine_.faultDetail(), 22, 89, 196, 2, 1, cText_,
+                  TextAlign::LEFT, 2);
 
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 126);
-  frame_.print("Temperature");
+  drawFittedText("Sensor", 22, 119, 84, 16, 1, cMuted_, TextAlign::LEFT);
+  drawFittedText(reading.valid ? "VALID" : "INVALID", 112, 119, 106, 16, 1,
+                 reading.valid ? cGreen_ : cRed_, TextAlign::LEFT);
+
+  drawFittedText("Temperature", 22, 142, 84, 16, 1, cMuted_,
+                 TextAlign::LEFT);
   if (reading.valid) {
     snprintf(line, sizeof(line), "%.1f C", reading.filteredC);
   } else {
     strlcpy(line, "--.- C", sizeof(line));
   }
-  frame_.setTextColor(cText_);
-  frame_.setCursor(112, 126);
-  frame_.print(line);
+  drawFittedText(line, 112, 142, 106, 16, 1, cText_, TextAlign::LEFT);
 
-  frame_.setTextColor(cMuted_);
-  frame_.setCursor(22, 149);
-  frame_.print("Heater output");
-  frame_.setTextColor(cGreen_);
-  frame_.setCursor(112, 149);
-  frame_.print(heater_.outputOn() ? "ON" : "OFF");
+  drawFittedText("Heater output", 22, 165, 84, 16, 1, cMuted_,
+                 TextAlign::LEFT);
+  drawFittedText(heater_.outputOn() ? "ON" : "OFF", 112, 165, 106, 16, 1,
+                 heater_.outputOn() ? cRed_ : cGreen_, TextAlign::LEFT);
 
-  frame_.setTextColor(cYellow_);
-  frame_.setCursor(22, 177);
-  frame_.print("Reset only after cause is fixed");
-
+  drawFittedText("Fix cause before reset", 22, 187, 196, 11, 1, cYellow_,
+                 TextAlign::CENTER);
   drawButtons("BACK", "HOME", "HOLD RST");
 }
 
 void UiManager::drawDeleteConfirm() {
-  drawHeader("DELETE PROFILE", "CONFIRM", cRed_);
+  drawHeader("DELETE", "CONFIRM", cRed_);
   drawPanel(12, 51, 216, 116, true, cRed_);
-  drawCentered("Delete this profile?", 70, 2, cText_);
-  drawCentered(editProfile_.name, 105, 2, cRed_);
+  drawFittedText("Delete profile?", 22, 66, 196, 24, 2, cText_,
+                 TextAlign::CENTER);
+  drawFittedText(editProfile_.name, 22, 99, 196, 24, 2, cRed_,
+                 TextAlign::CENTER);
   drawCentered("This cannot be undone", 145, 1, cYellow_);
   drawButtons("CANCEL", "DELETE", "CANCEL");
 }

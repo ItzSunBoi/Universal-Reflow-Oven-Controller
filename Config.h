@@ -59,8 +59,8 @@ constexpr uint32_t TFT_WAKE_EVENT_GUARD_MS = 900UL;
 
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
-// Initialize using the exact speed proven by the successful ESP32-S3 test,
-// then use a faster but conservative clock for full-screen UI transfers.
+// Use a moderate startup clock for controller initialization, then the
+// requested high-speed runtime clock for framebuffer transfers.
 constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
 constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
@@ -101,8 +101,8 @@ constexpr int8_t PIN_MAX31865_SDI = 18;  // ESP32 MOSI -> MAX31865; group E
 constexpr int8_t PIN_MAX31865_CS  = 40;  // Connector group E
 constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
 constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
-constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
-constexpr uint8_t RTD_WIRE_COUNT = 3;         // 2, 3, or 4
+constexpr float RTD_REFERENCE_OHMS = 4300.0f;  // Confirm fitted reference resistor
+constexpr uint8_t RTD_WIRE_COUNT = 2;         // 2, 3, or 4
 constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 
 // User controls. Buttons connect the GPIO to GND when pressed.
@@ -115,11 +115,11 @@ constexpr int8_t PIN_SSR = 16;
 constexpr bool SSR_ACTIVE_HIGH = true;
 
 // Optional buzzer. Set to -1 to disable.
-constexpr int8_t PIN_BUZZER = -1;  // Dedicated header group B
+constexpr int8_t PIN_BUZZER = -1;
 constexpr bool BUZZER_ACTIVE_HIGH = true;
 
 // Optional cooling fan relay/MOSFET. Set to -1 to disable.
-constexpr int8_t PIN_COOLING_FAN = -1;  // Dedicated connector group G
+constexpr int8_t PIN_COOLING_FAN = -1;
 constexpr bool FAN_ACTIVE_HIGH = true;
 
 constexpr uint32_t SERIAL_BAUD = 115200;

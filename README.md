@@ -1,4 +1,4 @@
-# Universal Reflow Controller v1.9.2
+# Universal Reflow Controller v1.9.3
 
 Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
@@ -10,7 +10,36 @@ Arduino firmware for an ESP32-S3-WROOM-1-N16 reflow oven controller using:
 
 The original dark Ocean UI layout, page order, three-button footer, mode-2 display transport, dirty-tile framebuffer, asynchronous button scanner, PWM backlight, inactivity dimming, and safety interlocks remain intact.
 
-## Changes in v1.9.2
+## Changes in v1.9.3
+
+### UI text-fit audit
+
+All page titles, status badges, footer labels, list rows, fixed instructions,
+and dynamic profile, stage, fault, autotune, and OTA strings were checked
+against their actual 240x240 drawing regions.
+
+The UI now has width-aware fitted text, word-wrapped detail messages, reserved
+header space for status badges, constrained footer labels, and panel-aware
+profile-name rendering. Long fault details no longer collide with later rows,
+and the OTA upload percentage no longer overlaps heap diagnostics. See
+`UI_TEXT_AUDIT.md` for the full review.
+
+### Requested hardware configuration
+
+```cpp
+constexpr uint32_t TFT_INIT_SPI_HZ = 4000000UL;
+constexpr uint32_t TFT_SPI_HZ = 40000000UL;
+constexpr int8_t PIN_COOLING_FAN = -1;
+constexpr int8_t PIN_BUZZER = -1;
+constexpr float RTD_NOMINAL_OHMS = 100.0f;
+constexpr float RTD_REFERENCE_OHMS = 4300.0f;
+constexpr uint8_t RTD_WIRE_COUNT = 2;
+```
+
+The NTC/MAX31865 compile-time selector and both sensor implementations remain
+unchanged.
+
+## Changes retained from v1.9.2
 
 ### Button-function audit and fixes
 
@@ -125,7 +154,7 @@ The display has no exposed chip-select and is permanently selected, so it uses i
 | GND | GND |
 | VCC | Module-rated supply |
 
-The custom driver uses the proven configuration: SPI mode 2, no CS toggling, `COLMOD=0x05`, inversion on, normal mode on, then display on.
+The custom driver uses SPI mode 2, no CS toggling, `COLMOD=0x05`, inversion on, normal mode on, then display on. v1.9.3 initializes at 4 MHz and uses 40 MHz for normal framebuffer transfers.
 
 ## Temperature sensor wiring
 
@@ -176,7 +205,7 @@ Use the AO3400A as a low-side driver:
 - MOSFET drain to SSR input negative;
 - SSR input positive to 5 V.
 
-The firmware is configured for an active-high control command and a two-second time-proportioning window.
+The firmware is configured for an active-high control command and a two-second time-proportioning window. The optional buzzer and cooling-fan outputs are disabled by default with pin value `-1`.
 
 ## Safety
 
@@ -186,7 +215,7 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 
 ## Main source files
 
-- `UniversalReflowController_v1_9_2.ino`: initialization and main control loop
+- `UniversalReflowController_v1_9_3.ino`: initialization and main control loop
 - `CslessST7789.*`: mode-2 no-CS display driver
 - `UiManager.*`: UI, themes, centered temperatures, OTA and autotune pages
 - `OtaManager.*`: temporary AP, browser upload, flash update, restart
@@ -199,6 +228,8 @@ Keep the SSR or mains heater disconnected during initial firmware, display, sens
 - `partitions.csv`: dual-application OTA partition table
 - `BUTTON_AUDIT.md`: page-by-page three-button behavior matrix
 - `tools/verify_button_contracts.py`: static regression audit for button mappings
+- `tools/verify_ui_text_layout.py`: static text-width and layout contract audit
+- `UI_TEXT_AUDIT.md`: page text review and corrected overflow cases
 
 
 ## OTA stability diagnostics (v1.9.2)

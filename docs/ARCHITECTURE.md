@@ -35,6 +35,14 @@ This requires one 115,200-byte RGB565 framebuffer. Tile hashes require only 400 
 
 The technique addresses clear/redraw flicker while retaining the original Adafruit GFX drawing code and page geometry.
 
+### Text fitting
+
+`UiManager` measures the classic Adafruit GFX character grid before drawing.
+Headers reserve space for status badges, buttons and list rows constrain text
+to their interiors, and dynamic details can wrap across two lines with an
+ellipsis on the final line. This prevents custom names and runtime fault or OTA
+messages from escaping their panels.
+
 ## Display driver
 
 The custom `CslessST7789` driver uses:

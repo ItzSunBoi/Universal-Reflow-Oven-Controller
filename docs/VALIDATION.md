@@ -1,4 +1,22 @@
-# Validation notes for v1.9.2
+# Validation notes for v1.9.3
+
+## UI text-layout audit
+
+The automated layout regression reports:
+
+```text
+UI text layout audit PASSED
+Checked fitted/wrapped helpers, fixed centered strings, header widths, and requested config values.
+```
+
+Run it with:
+
+```bash
+python tools/verify_ui_text_layout.py
+```
+
+`UiManager.cpp` was syntax-compiled as C++17 with `-Wall -Wextra -Werror`
+against an Arduino/Adafruit API-shape harness after the layout changes.
 
 ## Button contract audit
 
@@ -19,7 +37,7 @@ The audit specifically checks the live PID autotune `DETAIL` and `INFO` actions,
 
 ## Static C++ checks
 
-The modified `UiManager.cpp` and main Arduino sketch were checked using C++17 syntax compilation with warnings promoted to errors against a local Arduino/Adafruit API-shape stub environment:
+The modified `UiManager.cpp` was checked using C++17 syntax compilation with warnings promoted to errors against a local Arduino/Adafruit API-shape stub environment:
 
 ```text
 -Wall -Wextra -Wpedantic -Werror
@@ -29,7 +47,7 @@ The page enum contains 24 pages, and every page has both a draw-switch case and 
 
 ## Hardware status
 
-The changes have not yet been compiled in the user's exact Arduino-ESP32 3.3.2 environment or tested on the physical panel. The code changes are limited to UI navigation, labels, and information pages; heater, sensor, NVS, OTA partition, and PID control algorithms are unchanged.
+The changes have not yet been compiled in the user's exact Arduino-ESP32 3.3.2 environment or tested on the physical panel. Heater control, sensor selection, NVS layout, OTA partitions, and PID algorithms are unchanged.
 
 
 ## OTA v1.9.2 checks
