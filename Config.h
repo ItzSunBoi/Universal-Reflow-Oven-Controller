@@ -4,32 +4,37 @@
 
 // -----------------------------------------------------------------------------
 // Target hardware: ESP32-S3-WROOM-1-N16, Arduino-ESP32 3.x
-// Display: 240x240 ST7789 with a dedicated CS pin
-// Temperature: MAX31865 + PT100 on the same SPI bus
+// Display: 240x240 ST7789 module with NO exposed CS pin
+// Temperature: MAX31865 + PT100 on an independent SPI controller
 // Heater: zero-cross AC SSR, time-proportioned output
 // -----------------------------------------------------------------------------
 
-// Shared SPI bus. Avoid GPIO35-37 on ESP32-S3 modules that may use Octal memory.
-constexpr int8_t PIN_SPI_SCK  = 12;
-constexpr int8_t PIN_SPI_MOSI = 11;
-constexpr int8_t PIN_SPI_MISO = 13;
+// The CS-less display is permanently selected, so it must not share SCK/MOSI
+// with another SPI peripheral. The ESP32-S3 provides two independent general-
+// purpose SPI controllers, used here as FSPI for the display and HSPI for the
+// MAX31865.
 
-// ST7789 display
-constexpr int8_t PIN_TFT_CS   = 10;
+// ST7789 display bus (FSPI). The display is write-only, so MISO is unused.
+constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL
+constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA
 constexpr int8_t PIN_TFT_DC   = 9;
-constexpr int8_t PIN_TFT_RST  = 8;
-constexpr int8_t PIN_TFT_BL   = 7;
+constexpr int8_t PIN_TFT_RST  = 8;   // Display RES
+constexpr int8_t PIN_TFT_BL   = 7;   // Display BLK
 constexpr bool TFT_BACKLIGHT_ACTIVE_HIGH = true;
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
 constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
-// MAX31865
-constexpr int8_t PIN_MAX31865_CS = 14;
-constexpr float RTD_NOMINAL_OHMS = 100.0f;   // PT100
-constexpr float RTD_REFERENCE_OHMS = 430.0f; // Confirm the resistor fitted to your board
-constexpr uint8_t RTD_WIRE_COUNT = 3;          // 2, 3, or 4
-constexpr bool RTD_USE_50HZ_FILTER = true;   // Tanzania / UK mains frequency
+// MAX31865 bus (HSPI).
+constexpr int8_t PIN_MAX31865_CLK = 14;
+constexpr int8_t PIN_MAX31865_SDO = 13;  // MAX31865 -> ESP32 MISO
+constexpr int8_t PIN_MAX31865_SDI = 10;  // ESP32 MOSI -> MAX31865
+constexpr int8_t PIN_MAX31865_CS  = 21;
+constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
+constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
+constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
+constexpr uint8_t RTD_WIRE_COUNT = 3;         // 2, 3, or 4
+constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 
 // User controls. Buttons connect the GPIO to GND when pressed.
 constexpr int8_t PIN_BUTTON_LEFT   = 4;
@@ -94,3 +99,7 @@ constexpr uint8_t fanOffLevel() {
 
 static_assert(PIN_SSR >= 0, "SSR pin must be configured");
 static_assert(PIN_ESTOP >= 0, "E-stop pin must be configured");
+static_assert(PIN_TFT_SCK != PIN_MAX31865_CLK,
+              "CS-less TFT and MAX31865 must use separate clock pins");
+static_assert(PIN_TFT_MOSI != PIN_MAX31865_SDI,
+              "CS-less TFT and MAX31865 must use separate data pins");

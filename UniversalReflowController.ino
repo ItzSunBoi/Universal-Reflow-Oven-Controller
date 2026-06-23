@@ -12,12 +12,17 @@
 #include "TemperatureSensor.h"
 #include "UiManager.h"
 
-SPIClass sharedSpi(FSPI);
-Adafruit_ST7789 display(&sharedSpi, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
+// The display has no exposed CS pin and is permanently selected. It therefore
+// receives its own hardware SPI controller and physical SCK/MOSI wires.
+SPIClass displaySpi(FSPI);
+SPIClass max31865Spi(HSPI);
+
+// -1 tells the Adafruit ST7789 driver that the display has no controllable CS.
+Adafruit_ST7789 display(&displaySpi, -1, PIN_TFT_DC, PIN_TFT_RST);
 
 ButtonInput buttons;
 ProfileStore profileStore;
-TemperatureSensor temperatureSensor(sharedSpi);
+TemperatureSensor temperatureSensor(max31865Spi);
 HeaterController heater;
 ReflowEngine reflowEngine(heater);
 UiManager ui(display, profileStore, reflowEngine, temperatureSensor);
@@ -32,11 +37,16 @@ max31865_numwires_t configuredWireMode() {
   }
 }
 
-void initializeChipSelects() {
-  pinMode(PIN_TFT_CS, OUTPUT);
+void initializePeripheralPins() {
+  // The TFT has no CS line. Only the MAX31865 CS needs an idle level.
   pinMode(PIN_MAX31865_CS, OUTPUT);
-  digitalWrite(PIN_TFT_CS, HIGH);
   digitalWrite(PIN_MAX31865_CS, HIGH);
+
+  // Keep the display control lines in benign states before bus startup.
+  pinMode(PIN_TFT_DC, OUTPUT);
+  digitalWrite(PIN_TFT_DC, HIGH);
+  pinMode(PIN_TFT_RST, OUTPUT);
+  digitalWrite(PIN_TFT_RST, HIGH);
 }
 
 void updateCoolingFan() {
@@ -64,10 +74,13 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.0");
+  Serial.println("Universal Reflow Controller v1.1");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
-  Serial.printf("SPI SCK=%d MOSI=%d MISO=%d\n", PIN_SPI_SCK, PIN_SPI_MOSI,
-                PIN_SPI_MISO);
+  Serial.printf("TFT FSPI: SCK=%d MOSI=%d CS=none DC=%d RST=%d\n",
+                PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST);
+  Serial.printf("MAX31865 HSPI: CLK=%d SDI=%d SDO=%d CS=%d\n",
+                PIN_MAX31865_CLK, PIN_MAX31865_SDI,
+                PIN_MAX31865_SDO, PIN_MAX31865_CS);
   Serial.printf("Profiles loaded: %u\n", profileStore.profileCount());
   Serial.printf("E-stop circuit: %s\n",
                 safetyEstopCircuitHealthy() ? "healthy" : "OPEN/FAULT");
@@ -87,8 +100,13 @@ void setup() {
     digitalWrite(PIN_COOLING_FAN, fanOffLevel());
   }
 
-  initializeChipSelects();
-  sharedSpi.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, -1);
+  initializePeripheralPins();
+
+  // Independent physical buses are mandatory because the display is always
+  // selected and would interpret MAX31865 clock edges as display traffic.
+  displaySpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, -1);
+  max31865Spi.begin(PIN_MAX31865_CLK, PIN_MAX31865_SDO,
+                    PIN_MAX31865_SDI, PIN_MAX31865_CS);
 
   display.init(240, 240, SPI_MODE0);
   display.setSPISpeed(TFT_SPI_HZ);

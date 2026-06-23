@@ -15,6 +15,11 @@ The firmware deliberately keeps the main control path non-blocking:
 
 The dedicated E-stop ISR does not wait for this loop. It immediately writes the SSR command inactive and latches the heater inhibit.
 
+
+## SPI architecture
+
+The display has no exposed CS pin and is permanently selected. It is therefore isolated on the ESP32-S3 FSPI controller using GPIO12 for SCK and GPIO11 for MOSI. The MAX31865 uses the independent HSPI controller with GPIO14/13/10/21 for CLK/SDO/SDI/CS. No clock or data wire is shared between the devices.
+
 ## Core modules
 
 - `ButtonInput`: three-button debounce, short press, long press, and auto-repeat.
