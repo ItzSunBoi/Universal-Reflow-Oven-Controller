@@ -1,0 +1,7 @@
+{
+  "idf.currentSetup": "C:\\Users\\Sun\\esp\\v5.5.1\\esp-idf",
+  "idf.openOcdConfigs": [
+    "interface/ftdi/esp32_devkitj_v1.cfg",
+    "target/esp32.cfg"
+  ]
+}
