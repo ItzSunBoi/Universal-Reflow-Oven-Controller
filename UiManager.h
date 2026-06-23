@@ -1,9 +1,9 @@
 #pragma once
 
 #include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
 
 #include "BacklightController.h"
+#include "CslessST7789.h"
 #include "ButtonInput.h"
 #include "ProfileStore.h"
 #include "ReflowEngine.h"
@@ -11,7 +11,7 @@
 
 class UiManager {
  public:
-  UiManager(Adafruit_ST7789 &display, ProfileStore &profiles,
+  UiManager(CslessST7789 &display, ProfileStore &profiles,
             ReflowEngine &engine, TemperatureSensor &sensor,
             BacklightController &backlight);
 
@@ -57,7 +57,7 @@ class UiManager {
     STAGE,
   };
 
-  Adafruit_ST7789 &tft_;
+  CslessST7789 &tft_;
   ProfileStore &profiles_;
   ReflowEngine &engine_;
   TemperatureSensor &sensor_;

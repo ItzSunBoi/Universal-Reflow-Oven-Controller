@@ -2,11 +2,14 @@
 
 ## Completed off-target checks
 
-- All `.cpp`, `.h`, and `.ino` sources were compiled and linked with a local C++17 Arduino/Adafruit API-shape stub.
-- Compiler flags included `-Wall -Wextra -Wpedantic`.
-- The host-side check completed without warnings after removing one unused display-size constant.
+- All v1.5 `.cpp`, `.h`, and `.ino` sources were compiled and linked together using a local C++17 Arduino/Adafruit API-shape environment.
+- Compiler flags were `-Wall -Wextra -Wpedantic`; the host-side build completed without warnings.
+- The `CslessST7789` interface was cross-checked against the current official Adafruit GFX virtual transaction API and Arduino-ESP32 `SPIClass::transferBytes` API.
+- A full ESP32-S3 target compile must still be run in the user's Arduino installation because the container could not retrieve the Espressif board toolchain.
 - The project folder and main `.ino` filename match.
 - The CS-less ST7789 and MAX31865 use separate `SPIClass` objects and separate physical SPI pins.
+- The display transport uses `SPI_MODE2`, has no CS operation, and reproduces the command sequence that worked on the physical display.
+- UI code now depends on the custom Adafruit GFX-compatible driver rather than Adafruit_ST7789.
 - The display has both a software reset GPIO and a software PWM backlight GPIO.
 - All GPIO E-stop references and interrupt code have been removed from the firmware.
 - No active connector group is assigned to more than one module.

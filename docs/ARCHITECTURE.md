@@ -23,6 +23,7 @@ Before this loop begins, `Safety` forces the SSR command inactive and holds a st
 - `ReflowEngine`: ramp/hold/cool state machine, live graph history, run metrics, and thermal safety checks.
 - `ProfileStore`: CRC-protected NVS database for profiles, settings, and run summaries.
 - `BacklightController`: LEDC PWM output for the display module's `BLK` MOSFET input.
+- `CslessST7789`: dedicated no-CS ST7789 transport using SPI mode 2 and the proven command sequence, exposed as an Adafruit GFX-compatible display.
 - `UiManager`: all 240x240 pages and three-button editors.
 
 ## Profile execution
@@ -62,7 +63,7 @@ A schema version mismatch or CRC failure restores the compiled factory profiles.
 - fixed bottom row of three button legends
 - original home, profile, running, complete, menu, manual, and fault page ordering
 
-## Carrier connector isolation in v1.4
+## Carrier connector isolation in v1.5
 
 The physical pin map is organized around the reused carrier PCB rather than conventional dev-board header order.
 
@@ -73,3 +74,27 @@ The physical pin map is organized around the reused carrier PCB rather than conv
 - Optional buzzer and fan outputs occupy groups B and G.
 
 No connector group is shared by different modules. The display is permitted to span two groups so it can retain both software reset and software PWM backlight control.
+
+
+## Display protocol
+
+The display controller is permanently selected because the module exposes no
+CS pin. The firmware therefore gives it a dedicated FSPI controller and never
+toggles a synthetic CS. The physical module was confirmed to require CPOL=1,
+CPHA=0 (`SPI_MODE2`) on the ESP32-S3. Initialization runs at the proven 1 MHz;
+after `DISPON`, normal UI drawing switches to 10 MHz so screen refreshes do not
+dominate the control loop. Initialization deliberately follows the
+working MicroPython implementation:
+
+1. active-low hardware reset
+2. `SWRESET` and 150 ms delay
+3. `SLPOUT`
+4. `COLMOD = 0x05`
+5. rotation-specific `MADCTL` and 240x240 RAM offsets
+6. `INVON`
+7. `NORON`
+8. `DISPON`
+
+The custom class inherits `Adafruit_GFX`; therefore `UiManager` retains the
+approved drawing and layout implementation without depending on Adafruit's
+ST7789 transport layer.

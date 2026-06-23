@@ -24,6 +24,8 @@ Groups A and D are both reserved exclusively for the display. Their unused GPIOs
 ## ST7789 display: groups A and D
 
 The display has no chip-select pin and therefore uses its own FSPI controller.
+The controller is driven in SPI mode 2 (clock idle high, data captured on the
+first edge), matching the configuration proven on the physical module.
 
 ### Group D: display bus and control
 
@@ -95,4 +97,4 @@ The optional fan driver uses GPIO38. Use a MOSFET or relay driver and a flyback 
 
 ## Emergency isolation
 
-No GPIO E-stop is used in v1.4. For an emergency, disconnect the oven from mains power. Arrange the wiring so the accessible plug or switched socket removes power from the heater circuit itself.
+No GPIO E-stop is used in v1.5. For an emergency, disconnect the oven from mains power. Arrange the wiring so the accessible plug or switched socket removes power from the heater circuit itself.

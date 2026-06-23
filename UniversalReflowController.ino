@@ -1,9 +1,9 @@
 #include <Adafruit_GFX.h>
-#include <Adafruit_ST7789.h>
 #include <Adafruit_MAX31865.h>
 #include <SPI.h>
 
 #include "BacklightController.h"
+#include "CslessST7789.h"
 #include "ButtonInput.h"
 #include "Config.h"
 #include "HeaterController.h"
@@ -18,8 +18,8 @@
 SPIClass displaySpi(FSPI);
 SPIClass max31865Spi(HSPI);
 
-// -1 tells the Adafruit ST7789 driver that the display has no controllable CS.
-Adafruit_ST7789 display(&displaySpi, -1, PIN_TFT_DC, PIN_TFT_RST);
+// Custom driver reproducing the known-working no-CS mode-2 command stream.
+CslessST7789 display(displaySpi, PIN_TFT_DC, PIN_TFT_RST);
 
 BacklightController backlight;
 ButtonInput buttons;
@@ -78,10 +78,12 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.4");
+  Serial.println("Universal Reflow Controller v1.5");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
-  Serial.printf("TFT FSPI: SCK=%d MOSI=%d CS=none DC=%d RST=%d\n",
-                PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST);
+  Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
+                PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
+                static_cast<unsigned long>(TFT_INIT_SPI_HZ),
+                static_cast<unsigned long>(TFT_SPI_HZ));
   Serial.printf("MAX31865 HSPI: CLK=%d SDI=%d SDO=%d CS=%d\n",
                 PIN_MAX31865_CLK, PIN_MAX31865_SDI,
                 PIN_MAX31865_SDO, PIN_MAX31865_CS);
@@ -113,15 +115,15 @@ void setup() {
 
   // Independent physical buses are mandatory because the display is always
   // selected and would interpret MAX31865 clock edges as display traffic.
-  displaySpi.begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, -1);
   max31865Spi.begin(PIN_MAX31865_CLK, PIN_MAX31865_SDO,
                     PIN_MAX31865_SDI, PIN_MAX31865_CS);
 
-  display.init(240, 240, SPI_MODE0);
+  // This uses the exact configuration proven on the physical module:
+  // no CS, SPI mode 2, COLMOD 0x05, INVON, NORON, then DISPON.
+  display.begin(PIN_TFT_SCK, PIN_TFT_MOSI, TFT_INIT_SPI_HZ, TFT_ROTATION,
+                TFT_INVERT_COLORS);
   display.setSPISpeed(TFT_SPI_HZ);
-  display.setRotation(TFT_ROTATION);
-  display.invertDisplay(TFT_INVERT_COLORS);
-  display.fillScreen(ST77XX_BLACK);
+  display.fillScreen(0x0000);
 
   profileStore.begin();
   temperatureSensor.setCalibrationOffset(

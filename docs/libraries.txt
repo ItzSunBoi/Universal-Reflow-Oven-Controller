@@ -1,5 +1,4 @@
 ESP32 Arduino core 3.x
 Adafruit GFX Library
-Adafruit ST7735 and ST7789 Library
 Adafruit MAX31865 library
 Adafruit BusIO

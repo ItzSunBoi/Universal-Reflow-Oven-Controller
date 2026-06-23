@@ -35,7 +35,7 @@ float profilePeakTargetC(const ReflowProfile &profile) {
 }
 }  // namespace
 
-UiManager::UiManager(Adafruit_ST7789 &display, ProfileStore &profiles,
+UiManager::UiManager(CslessST7789 &display, ProfileStore &profiles,
                      ReflowEngine &engine, TemperatureSensor &sensor,
                      BacklightController &backlight)
     : tft_(display), profiles_(profiles), engine_(engine), sensor_(sensor),
@@ -896,7 +896,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.4", 79, 2, cText_);
+  drawCentered("Controller v1.5", 79, 2, cText_);
 
   tft_.setTextSize(1);
   tft_.setTextColor(cMuted_);

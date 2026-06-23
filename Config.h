@@ -36,6 +36,7 @@
 // never shared between different modules.
 
 // ST7789 display bus (FSPI). The display is write-only, so MISO is unused.
+// Its fixed-low internal CS requires CPOL=1, CPHA=0 (SPI mode 2).
 constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL; connector group D
 constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA; connector group D
 constexpr int8_t PIN_TFT_DC   = 41;  // Connector group D
@@ -49,6 +50,9 @@ constexpr uint8_t TFT_BACKLIGHT_MIN_PERCENT = 10;
 constexpr uint8_t TFT_BACKLIGHT_STEP_PERCENT = 10;
 constexpr bool TFT_INVERT_COLORS = true;
 constexpr uint8_t TFT_ROTATION = 0;
+// Initialize using the exact speed proven by the successful ESP32-S3 test,
+// then use a faster but conservative clock for full-screen UI transfers.
+constexpr uint32_t TFT_INIT_SPI_HZ = 1000000UL;
 constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 
 // MAX31865 bus (HSPI).
@@ -58,8 +62,8 @@ constexpr int8_t PIN_MAX31865_SDI = 18;  // ESP32 MOSI -> MAX31865; group E
 constexpr int8_t PIN_MAX31865_CS  = 40;  // Connector group E
 constexpr int8_t PIN_MAX31865_RDY = -1;  // Optional; library polls instead
 constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
-constexpr float RTD_REFERENCE_OHMS = 430.0f;  // Confirm fitted reference resistor
-constexpr uint8_t RTD_WIRE_COUNT = 3;         // 2, 3, or 4
+constexpr float RTD_REFERENCE_OHMS = 4300.0f;  // Confirm fitted reference resistor
+constexpr uint8_t RTD_WIRE_COUNT = 2;         // 2, 3, or 4
 constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 
 // User controls. Buttons connect the GPIO to GND when pressed.
