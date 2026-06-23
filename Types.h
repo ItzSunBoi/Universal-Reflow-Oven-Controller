@@ -59,7 +59,6 @@ enum class RunState : uint8_t {
 
 enum class FaultCode : uint8_t {
   NONE,
-  ESTOP,
   SENSOR,
   OVERTEMPERATURE,
   HEATING_FAILURE,
@@ -88,7 +87,6 @@ inline const char *stageModeName(StageMode mode) {
 inline const char *faultCodeName(FaultCode code) {
   switch (code) {
     case FaultCode::NONE: return "No fault";
-    case FaultCode::ESTOP: return "Emergency stop";
     case FaultCode::SENSOR: return "Temperature sensor";
     case FaultCode::OVERTEMPERATURE: return "Overtemperature";
     case FaultCode::HEATING_FAILURE: return "Heating failure";

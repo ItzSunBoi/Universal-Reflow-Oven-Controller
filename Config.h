@@ -23,19 +23,24 @@
 // F: GPIO39, GPIO17, GPIO16, GPIO15 + 5 V + GND
 // G: GPIO1, GPIO2, GPIO7, GPIO38 + 5 V + GND
 //
-// Allocation: A=E-stop, B=buzzer, C=buttons, D=TFT, E=MAX31865,
-// F=SSR, G=cooling fan. No active module spans multiple connector groups.
+// Allocation:
+//   A + D = TFT display (A provides PWM backlight and optional 3.3 V power;
+//                       D provides SCK, MOSI, DC, and RESET)
+//   B     = optional buzzer
+//   C     = three-button control panel
+//   E     = MAX31865
+//   F     = SSR interface
+//   G     = optional cooling fan
 //
-// TFT group D uses all four GPIOs: SCK, MOSI, DC, and PWM backlight. The
-// display RES pin is not driven by a GPIO; use the hardware reset wiring in
-// WIRING.md (preferred: RES tied to ESP32 EN, or an RC pull-up to 3.3 V).
+// A module may occupy more than one connector group, but connector groups are
+// never shared between different modules.
 
 // ST7789 display bus (FSPI). The display is write-only, so MISO is unused.
 constexpr int8_t PIN_TFT_SCK  = 12;  // Display SCL; connector group D
 constexpr int8_t PIN_TFT_MOSI = 11;  // Display SDA; connector group D
 constexpr int8_t PIN_TFT_DC   = 41;  // Connector group D
-constexpr int8_t PIN_TFT_RST  = -1;  // Hardware reset; no GPIO consumed
-constexpr int8_t PIN_TFT_BL   = 10;  // PWM to module BLK MOSFET; group D
+constexpr int8_t PIN_TFT_RST  = 10;  // Display RES; connector group D
+constexpr int8_t PIN_TFT_BL   = 13;  // PWM to module BLK MOSFET; group A
 constexpr bool TFT_BACKLIGHT_ACTIVE_HIGH = true;
 constexpr uint32_t TFT_BACKLIGHT_PWM_HZ = 20000UL;
 constexpr uint8_t TFT_BACKLIGHT_PWM_BITS = 10;
@@ -61,11 +66,6 @@ constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
 constexpr int8_t PIN_BUTTON_LEFT   = 4;
 constexpr int8_t PIN_BUTTON_MIDDLE = 5;
 constexpr int8_t PIN_BUTTON_RIGHT  = 6;
-
-// Emergency stop: normally-closed switch from GPIO to GND.
-// Add an external 10 kOhm pull-up to 3.3 V. Healthy = LOW, fault/open = HIGH.
-constexpr int8_t PIN_ESTOP = 13;  // Dedicated 3.3 V connector group A
-constexpr uint8_t ESTOP_ACTIVE_LEVEL = HIGH;
 
 // SSR output. Active-high SSR input is strongly recommended.
 constexpr int8_t PIN_SSR = 16;
@@ -119,7 +119,6 @@ constexpr uint8_t fanOffLevel() {
 }
 
 static_assert(PIN_SSR >= 0, "SSR pin must be configured");
-static_assert(PIN_ESTOP >= 0, "E-stop pin must be configured");
 static_assert(PIN_TFT_SCK != PIN_MAX31865_CLK,
               "CS-less TFT and MAX31865 must use separate clock pins");
 static_assert(PIN_TFT_MOSI != PIN_MAX31865_SDI,

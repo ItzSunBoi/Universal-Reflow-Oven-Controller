@@ -70,7 +70,7 @@ void updateCoolingFan() {
     }
   }
 
-  if (reflowEngine.state() == RunState::FAULT || safetyEstopLatched()) {
+  if (reflowEngine.state() == RunState::FAULT) {
     fanOn = false;
   }
   digitalWrite(PIN_COOLING_FAN, fanOn ? fanOnLevel() : fanOffLevel());
@@ -78,7 +78,7 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.3");
+  Serial.println("Universal Reflow Controller v1.4");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI: SCK=%d MOSI=%d CS=none DC=%d RST=%d\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST);
@@ -86,8 +86,6 @@ void printStartupSummary() {
                 PIN_MAX31865_CLK, PIN_MAX31865_SDI,
                 PIN_MAX31865_SDO, PIN_MAX31865_CS);
   Serial.printf("Profiles loaded: %u\n", profileStore.profileCount());
-  Serial.printf("E-stop circuit: %s\n",
-                safetyEstopCircuitHealthy() ? "healthy" : "OPEN/FAULT");
 }
 }  // namespace
 
@@ -135,12 +133,13 @@ void setup() {
   ui.update(millis());
   backlight.setPercent(profileStore.settings().backlightPercent);
 
+  // Peripheral initialization is complete. Release the startup-only software
+  // inhibit; sensor validity and the reflow state still gate every SSR pulse.
+  safetyArmHeaterControl();
+
   if (!sensorStarted) {
     reflowEngine.triggerFault(FaultCode::SENSOR,
                               "MAX31865 initialization failed");
-  } else if (safetyEstopLatched()) {
-    reflowEngine.triggerFault(FaultCode::ESTOP,
-                              "E-stop circuit open at boot");
   }
 
   printStartupSummary();
@@ -156,12 +155,6 @@ void loop() {
   }
 
   temperatureSensor.update(nowMs);
-
-  if (safetyEstopLatched() &&
-      reflowEngine.faultCode() != FaultCode::ESTOP) {
-    reflowEngine.triggerFault(FaultCode::ESTOP,
-                              "E-stop circuit opened");
-  }
 
   reflowEngine.update(temperatureSensor.reading(), nowMs);
 

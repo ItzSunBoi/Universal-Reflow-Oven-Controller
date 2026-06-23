@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstring>
 
-#include "Safety.h"
 
 ReflowEngine::ReflowEngine(HeaterController &heater) : heater_(heater) {}
 
@@ -11,7 +10,7 @@ bool ReflowEngine::startProfile(const ReflowProfile &profile,
                                 float currentTemperatureC,
                                 uint32_t nowMs) {
   if (state_ == RunState::RUNNING || state_ == RunState::PAUSED ||
-      state_ == RunState::MANUAL || safetyEstopLatched()) {
+      state_ == RunState::MANUAL) {
     return false;
   }
   if (profile.stageCount == 0 || profile.stageCount > MAX_PROFILE_STAGES) {
@@ -32,8 +31,7 @@ bool ReflowEngine::startProfile(const ReflowProfile &profile,
 
 bool ReflowEngine::startManual(float targetC, float currentTemperatureC,
                                uint32_t nowMs) {
-  if (state_ == RunState::RUNNING || state_ == RunState::PAUSED ||
-      safetyEstopLatched()) {
+  if (state_ == RunState::RUNNING || state_ == RunState::PAUSED) {
     return false;
   }
   manualTargetC_ = constrain(targetC, 40.0f, 250.0f);
@@ -50,10 +48,6 @@ void ReflowEngine::setManualTarget(float targetC) {
 
 void ReflowEngine::update(const TemperatureReading &reading,
                           uint32_t nowMs) {
-  if (safetyEstopLatched()) {
-    triggerFault(FaultCode::ESTOP, "E-stop circuit opened");
-  }
-
   if (state_ == RunState::FAULT || state_ == RunState::IDLE ||
       state_ == RunState::COMPLETE) {
     heaterDemandPercent_ = 0.0f;
@@ -186,7 +180,7 @@ void ReflowEngine::triggerFault(FaultCode code, const char *detail) {
 }
 
 bool ReflowEngine::clearFault() {
-  if (state_ != RunState::FAULT || safetyEstopLatched()) {
+  if (state_ != RunState::FAULT) {
     return false;
   }
   faultCode_ = FaultCode::NONE;

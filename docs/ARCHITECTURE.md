@@ -6,23 +6,23 @@ The firmware deliberately keeps the main control path non-blocking:
 
 1. debounce and queue UI button events
 2. sample the MAX31865 when its interval expires
-3. process the latched E-stop state
-4. update the reflow state machine and safety monitors
-5. persist any completed run summary
-6. update SSR time-proportioning output
-7. update the optional cooling fan
-8. redraw the current UI page when required
+3. update the reflow state machine and thermal safety monitors
+4. persist any completed run summary
+5. update SSR time-proportioning output
+6. update the optional cooling fan
+7. redraw the current UI page when required
 
-The dedicated E-stop ISR does not wait for this loop. It immediately writes the SSR command inactive and latches the heater inhibit.
+Before this loop begins, `Safety` forces the SSR command inactive and holds a startup inhibit until all peripherals have initialized.
 
 ## Core modules
 
 - `ButtonInput`: three-button debounce, short press, long press, and auto-repeat.
-- `Safety`: normally-closed E-stop interrupt and global heater-inhibit latch.
+- `Safety`: startup SSR inhibit and immediate software hard-off helper.
 - `TemperatureSensor`: MAX31865 communication, filtering, calibration, and fault handling.
 - `HeaterController`: PID and slow time-proportioned zero-cross SSR output.
 - `ReflowEngine`: ramp/hold/cool state machine, live graph history, run metrics, and thermal safety checks.
 - `ProfileStore`: CRC-protected NVS database for profiles, settings, and run summaries.
+- `BacklightController`: LEDC PWM output for the display module's `BLK` MOSFET input.
 - `UiManager`: all 240x240 pages and three-button editors.
 
 ## Profile execution
@@ -62,13 +62,14 @@ A schema version mismatch or CRC failure restores the compiled factory profiles.
 - fixed bottom row of three button legends
 - original home, profile, running, complete, menu, manual, and fault page ordering
 
-## Carrier connector isolation in v1.3
+## Carrier connector isolation in v1.4
 
-The physical pin map is organized around the reused carrier PCB rather than conventional dev-board header order. The CS-less TFT occupies group D, the MAX31865 occupies group E, the three-button panel occupies group C, the E-stop occupies group A, and the SSR interface occupies group F. Optional buzzer and fan outputs use groups B and G respectively. This keeps every active module within one physical connector group.
+The physical pin map is organized around the reused carrier PCB rather than conventional dev-board header order.
 
+- The CS-less TFT occupies connector groups A and D.
+- The MAX31865 occupies group E.
+- The button panel occupies group C.
+- The SSR interface occupies group F.
+- Optional buzzer and fan outputs occupy groups B and G.
 
-## Backlight control
-
-`BacklightController` owns GPIO10 and the Arduino-ESP32 LEDC channel. It applies
-the NVS brightness setting and provides a guaranteed off state during startup.
-The UI changes brightness immediately and then saves the selected percentage.
+No connector group is shared by different modules. The display is permitted to span two groups so it can retain both software reset and software PWM backlight control.

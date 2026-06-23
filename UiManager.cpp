@@ -4,11 +4,9 @@
 #include <cstring>
 
 #include "Config.h"
-#include "Safety.h"
 
 namespace {
 constexpr int16_t SCREEN_W = 240;
-constexpr int16_t SCREEN_H = 240;
 constexpr int16_t BUTTON_Y = 215;
 constexpr uint8_t VISIBLE_PROFILE_ROWS = 3;
 constexpr uint8_t VISIBLE_EDIT_ROWS = 5;
@@ -374,7 +372,7 @@ void UiManager::drawRunGraph(int16_t x, int16_t y, int16_t w, int16_t h) {
 }
 
 void UiManager::drawHome() {
-  const bool ready = sensor_.valid() && !safetyEstopLatched();
+  const bool ready = sensor_.valid();
   drawHeader("REFLOW OVEN", ready ? "READY" : "LOCKED",
              ready ? cGreen_ : cRed_);
 
@@ -898,7 +896,7 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller v1.3", 79, 2, cText_);
+  drawCentered("Controller v1.4", 79, 2, cText_);
 
   tft_.setTextSize(1);
   tft_.setTextColor(cMuted_);
@@ -925,12 +923,8 @@ void UiManager::drawFault() {
   tft_.setTextSize(1);
   tft_.setTextColor(cYellow_);
   tft_.setCursor(22, 187);
-  if (engine_.faultCode() == FaultCode::ESTOP && !safetyEstopCircuitHealthy()) {
-    tft_.print("Release E-stop / repair circuit");
-  } else {
-    tft_.print("Hold RESET to clear fault");
-  }
-  drawButtons("LOCKED", "DETAIL", "HOLD RST");
+  tft_.print("Hold RESET to clear fault");
+  drawButtons("STOPPED", "DETAIL", "HOLD RST");
 }
 
 void UiManager::drawDeleteConfirm() {
@@ -1143,7 +1137,7 @@ void UiManager::handleComplete(const ButtonEvent &event, uint32_t nowMs) {
   } else if (isPress(event, ButtonId::RIGHT)) {
     const ReflowProfile repeat = engine_.activeProfile();
     engine_.abortRun();
-    if (sensor_.valid() && !safetyEstopLatched()) {
+    if (sensor_.valid()) {
       engine_.startProfile(repeat, sensor_.temperatureC(), nowMs);
     }
   }
@@ -1191,7 +1185,7 @@ void UiManager::handleManual(const ButtonEvent &event, uint32_t nowMs) {
              event.action == ButtonAction::SHORT_PRESS) {
     if (engine_.state() == RunState::MANUAL) {
       engine_.abortRun();
-    } else if (sensor_.valid() && !safetyEstopLatched()) {
+    } else if (sensor_.valid()) {
       engine_.startManual(manualSetpointC_, sensor_.temperatureC(), nowMs);
     }
   } else if (event.button == ButtonId::MIDDLE &&
@@ -1287,9 +1281,6 @@ void UiManager::handleFault(const ButtonEvent &event) {
     return;
   }
 
-  if (engine_.faultCode() == FaultCode::ESTOP) {
-    if (!safetyResetEstopLatch()) return;
-  }
   if (engine_.clearFault()) {
     page_ = Page::HOME;
   }
@@ -1444,10 +1435,6 @@ void UiManager::moveStage(int direction) {
 bool UiManager::startSelectedProfile(uint32_t nowMs) {
   if (!sensor_.valid()) {
     engine_.triggerFault(FaultCode::SENSOR, sensor_.faultDescription());
-    return false;
-  }
-  if (safetyEstopLatched()) {
-    engine_.triggerFault(FaultCode::ESTOP, "E-stop circuit is open");
     return false;
   }
   if (!profiles_.validateProfile(profiles_.selectedProfile())) {

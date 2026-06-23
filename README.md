@@ -1,17 +1,23 @@
-# Universal Reflow Controller v1.0
+# Universal Reflow Controller v1.4
 
-Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 ST7789 SPI display, a MAX31865/PT100 temperature interface, three UI buttons, a dedicated normally-closed emergency-stop input, and a zero-cross AC SSR.
+Arduino project for an **ESP32-S3-WROOM-1-N16**, a 240x240 CS-less ST7789 display, a MAX31865/PT100 temperature interface, three UI buttons, software-controlled display backlight, and a zero-cross AC SSR.
 
-The interface preserves the original dark 240x240 design: cyan live values, green success, yellow profile/status information, orange heat output, red faults, fixed header placement, and fixed three-button legends along the bottom.
+The interface preserves the approved dark 240x240 design: cyan live values, green success, yellow profile/status information, orange heater output, red faults, fixed header placement, and fixed three-button legends along the bottom.
 
 ## Carrier PCB connector allocation
 
-Version 1.2 is mapped specifically for the reused carrier PCB connector groups supplied by the user. The TFT, MAX31865, three-button panel, E-stop, SSR interface, optional buzzer, and optional fan each occupy one connector group and do not share active connector sets. See `WIRING.md` for the exact mapping.
+This version follows the clarified connector rule:
 
+- one module may occupy more than one JST connector group
+- one connector group is never shared between different modules
+
+The display occupies groups **A and D**, the MAX31865 occupies **E**, the button panel occupies **C**, the SSR interface occupies **F**, the optional buzzer occupies **B**, and the optional fan occupies **G**. See `WIRING.md` for the exact mapping.
 
 ## Implemented features
 
-- Shared hardware SPI bus for the ST7789 and MAX31865, with separate chip-select pins.
+- Independent hardware SPI controllers for the CS-less ST7789 and MAX31865.
+- Software PWM backlight control with persistent brightness setting.
+- Software-controlled TFT reset.
 - 240x240 UI pages for home, profiles, profile details, running graph, run details, completion, profile editor, stage editor, profile naming, menu, manual heat, calibration, logs, settings, about, and faults.
 - Up to 8 profiles in ESP32 NVS flash.
 - Add a profile by duplicating the selected profile, then rename and edit it.
@@ -22,11 +28,12 @@ Version 1.2 is mapped specifically for the reused carrier PCB connector groups s
 - PID control with anti-windup and derivative-on-measurement.
 - Temperature calibration offset.
 - MAX31865 open/short/fault handling.
-- Latched E-stop GPIO interrupt.
 - Global and per-profile overtemperature protection.
 - Heater-response and conservative SSR-stuck monitoring.
 - Last 8 completed run summaries saved to NVS.
 - Optional active buzzer and cooling fan output.
+
+The previous GPIO E-stop input and interrupt have been removed. Emergency isolation is performed by disconnecting mains power. Firmware STOP, sensor-fault handling, and thermal protections remain available for normal and automatic shutdown.
 
 ## Required Arduino libraries
 
@@ -48,7 +55,7 @@ The ESP32 `Preferences` and `SPI` libraries are included with the Espressif Ardu
 - USB CDC On Boot: choose according to your programming connection
 - Partition scheme: any 16 MB scheme retaining the normal NVS partition
 
-Open `UniversalReflowController_v1_0.ino` from a folder with the same name.
+Open `UniversalReflowController_v1_4.ino` from a folder named `UniversalReflowController_v1_4`.
 
 ## Configuration
 
@@ -77,19 +84,15 @@ Check the actual reference resistor fitted to the MAX31865 board. PT100 boards c
 
 Hold the middle button on the manual page to stop heating and return to the menu. Hold the middle button in the name editor to save the name. Hold the right button on a fault page to reset after the fault condition has cleared.
 
-## E-stop behavior
+## Backlight behavior
 
-The firmware expects a **normally-closed** E-stop circuit:
-
-- GPIO15 to the normally-closed contact
-- other side of the contact to GND
-- external 10 kOhm pull-up from GPIO15 to 3.3 V
-- healthy circuit reads LOW
-- pressed button or broken wire reads HIGH
-
-The rising edge invokes an ISR which immediately commands the SSR output inactive and latches the fault. Firmware refuses reset while the E-stop input remains open.
-
-A software interrupt is not a complete emergency-stop system. The E-stop should additionally remove the SSR input enable or heater contactor power in hardware.
+- GPIO13 drives the module's `BLK` MOSFET input.
+- PWM frequency: 20 kHz.
+- Resolution: 10 bits.
+- Default brightness: 80%.
+- Adjustable range: 10% to 100%.
+- Brightness is stored in NVS.
+- The backlight remains off while the display initializes.
 
 ## Control tuning
 
@@ -101,7 +104,7 @@ float ki_ = 0.10f;
 float kd_ = 18.0f;
 ```
 
-These are safe starting values, not universal tuning. Oven power, thermal mass, fan placement, probe placement, and SSR cycle time all affect tuning. First test with the heater electrically isolated or with a low-risk test load.
+These are starting values, not universal tuning. Oven power, thermal mass, fan placement, probe placement, and SSR cycle time all affect tuning. First test with the heater electrically isolated or with a low-risk test load.
 
 ## Profile model
 
@@ -126,40 +129,30 @@ The profile editor constrains values to avoid obviously invalid combinations, an
 ## First-power checklist
 
 1. Keep mains disconnected.
-2. Confirm the SSR output is inactive during reset and boot.
-3. Confirm opening the E-stop circuit immediately extinguishes the SSR input indicator.
-4. Confirm the display and MAX31865 have different CS lines.
-5. Confirm the PT100 reading at room temperature against a trusted thermometer.
-6. Test the SSR with a low-voltage load or isolated indicator first.
-7. Install an independent thermal fuse in series with the heater.
+2. Confirm the SSR output is inactive during reset, boot, and firmware upload.
+3. Confirm the display and MAX31865 use separate physical SPI buses.
+4. Confirm the PT100 reading at room temperature against a trusted thermometer.
+5. Test the SSR with a low-voltage load or isolated indicator first.
+6. Install an independent thermal fuse in series with the heater.
+7. Ensure pulling the mains plug removes power from the heater, not only the controller electronics.
 8. Keep all exposed mains conductors enclosed and earthed appropriately.
-9. Tune and validate profiles using a thermocouple attached to a sacrificial PCB before processing valuable boards.
+9. Tune and validate profiles using an independent probe attached to a sacrificial PCB before processing valuable boards.
 
 ## Files
 
-- `UniversalReflowController_v1_0.ino`: setup and cooperative main loop
+- `UniversalReflowController_v1_4.ino`: setup and cooperative main loop
 - `Config.h`: pin mapping and hardware constants
 - `Types.h`: profile, stage, fault, settings, and log structures
-- `Safety.*`: E-stop ISR and heater inhibit latch
+- `Safety.*`: startup SSR inhibit and immediate software hard-off helper
 - `TemperatureSensor.*`: MAX31865/PT100 driver wrapper
 - `HeaterController.*`: PID and SSR time proportioning
 - `ReflowEngine.*`: profile state machine and safety monitors
 - `ProfileStore.*`: NVS profile/settings/log persistence with CRC
 - `ButtonInput.*`: debounce, short press, long press, and repeat events
+- `BacklightController.*`: LEDC PWM control for the TFT `BLK` input
 - `UiManager.*`: complete 240x240 interface and editors
-- `WIRING.md`: detailed default pin map and wiring notes
+- `WIRING.md`: detailed connector map and wiring notes
 - `SAFETY.md`: hardware safety requirements
 - `ARCHITECTURE.md`: module, state-machine, storage, and UI design
 - `VALIDATION.md`: checks completed and real-hardware commissioning work remaining
 - `docs/ui_reference_v1.png`: original approved 240x240 visual reference
-
-
-## PWM backlight
-
-The display BLK input is driven from GPIO10 using the ESP32-S3 LEDC peripheral
-at 20 kHz with 10-bit duty resolution. Brightness is stored in NVS and can be
-changed from **Menu → Settings → Backlight** in 10% steps. The firmware starts
-with the backlight off and enables it only after the first UI frame is drawn.
-
-To keep the TFT on one four-signal JST connector, the display RES pin uses a
-hardware reset instead of a GPIO. See `WIRING.md`.
