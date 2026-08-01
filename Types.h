@@ -94,7 +94,10 @@ struct TemperatureReading {
   uint16_t rawAdc;
   uint16_t adcMilliVolts;
   uint8_t max31865Fault;
+  uint8_t max31855Fault;
   uint8_t ntcFault;
+  uint8_t reservedSensor = 0;
+  float coldJunctionC;
   uint32_t timestampMs;
 };
 

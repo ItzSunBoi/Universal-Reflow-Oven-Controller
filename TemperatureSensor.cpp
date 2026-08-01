@@ -3,14 +3,16 @@
 #include <cmath>
 
 TemperatureSensor::TemperatureSensor(SPIClass &spi)
-    : max_(PIN_MAX31865_CS, &spi) {}
+    : max31865_(PIN_MAX31865_CS, &spi),
+      max31855_(PIN_MAX31855_CS, &spi) {}
 
 bool TemperatureSensor::begin(max31865_numwires_t wireMode) {
   reading_ = {};
   reading_.valid = false;
+  reading_.coldJunctionC = NAN;
   consecutiveFailures_ = 0;
 
-#if USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K
   (void)wireMode;
   pinMode(PIN_NTC_ADC, INPUT);
   analogReadResolution(NTC_ADC_RESOLUTION_BITS);
@@ -24,11 +26,17 @@ bool TemperatureSensor::begin(max31865_numwires_t wireMode) {
   (void)analogRead(PIN_NTC_ADC);
   (void)analogReadMilliVolts(PIN_NTC_ADC);
   initialized_ = true;
-#else
-  initialized_ = max_.begin(wireMode);
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  (void)wireMode;
+  initialized_ = max31855_.begin();
   if (initialized_) {
-    max_.enable50Hz(RTD_USE_50HZ_FILTER);
-    max_.clearFault();
+    max31855_.setFaultChecks(MAX31855_FAULT_ALL);
+  }
+#else
+  initialized_ = max31865_.begin(wireMode);
+  if (initialized_) {
+    max31865_.enable50Hz(RTD_USE_50HZ_FILTER);
+    max31865_.clearFault();
   }
 #endif
 
@@ -41,27 +49,38 @@ bool TemperatureSensor::update(uint32_t nowMs) {
   }
   lastSampleMs_ = nowMs;
 
-#if USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K
   return updateNtc(nowMs);
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  return updateMax31855(nowMs);
 #else
   return updateMax31865(nowMs);
 #endif
 }
 
-bool TemperatureSensor::updateMax31865(uint32_t nowMs) {
-  const uint16_t rawRtd = max_.readRTD();
-  const uint8_t fault = max_.readFault();
-  float rawC = max_.calculateTemperature(rawRtd, RTD_NOMINAL_OHMS,
-                                         RTD_REFERENCE_OHMS);
-  rawC += calibrationOffsetC_;
-
-  reading_.rawRtd = rawRtd;
+void TemperatureSensor::clearBackendDiagnostics() {
+  reading_.rawRtd = 0;
   reading_.rawAdc = 0;
   reading_.adcMilliVolts = 0;
+  reading_.sensorResistanceOhms = NAN;
+  reading_.max31865Fault = 0;
+  reading_.max31855Fault = 0;
+  reading_.ntcFault = NTC_FAULT_NONE;
+  reading_.coldJunctionC = NAN;
+}
+
+bool TemperatureSensor::updateMax31865(uint32_t nowMs) {
+  const uint16_t rawRtd = max31865_.readRTD();
+  const uint8_t fault = max31865_.readFault();
+  float rawC = max31865_.calculateTemperature(rawRtd, RTD_NOMINAL_OHMS,
+                                               RTD_REFERENCE_OHMS);
+  rawC += calibrationOffsetC_;
+
+  clearBackendDiagnostics();
+  reading_.rawRtd = rawRtd;
   reading_.sensorResistanceOhms =
       (static_cast<float>(rawRtd) / 32768.0f) * RTD_REFERENCE_OHMS;
   reading_.max31865Fault = fault;
-  reading_.ntcFault = NTC_FAULT_NONE;
 
   const bool inRange = std::isfinite(rawC) &&
                        rawC >= GLOBAL_MIN_VALID_TEMPERATURE_C &&
@@ -71,7 +90,38 @@ bool TemperatureSensor::updateMax31865(uint32_t nowMs) {
     acceptSample(rawC, nowMs, 0.22f);
   } else {
     rejectSample(rawC, nowMs);
-    max_.clearFault();
+    max31865_.clearFault();
+  }
+
+  return true;
+}
+
+bool TemperatureSensor::updateMax31855(uint32_t nowMs) {
+  clearBackendDiagnostics();
+
+  const double thermocoupleC = max31855_.readCelsius();
+  const uint8_t fault =
+      std::isfinite(thermocoupleC) ? 0U : max31855_.readError();
+  const double coldJunctionC = max31855_.readInternal();
+
+  reading_.max31855Fault = fault;
+  reading_.coldJunctionC = static_cast<float>(coldJunctionC);
+
+  float rawC = static_cast<float>(thermocoupleC);
+  rawC += calibrationOffsetC_;
+
+  const bool coldJunctionValid =
+      std::isfinite(coldJunctionC) &&
+      coldJunctionC >= MAX31855_MIN_COLD_JUNCTION_C &&
+      coldJunctionC <= MAX31855_MAX_COLD_JUNCTION_C;
+  const bool temperatureValid =
+      std::isfinite(rawC) && rawC >= GLOBAL_MIN_VALID_TEMPERATURE_C &&
+      rawC <= GLOBAL_MAX_VALID_TEMPERATURE_C;
+
+  if (fault == 0 && coldJunctionValid && temperatureValid) {
+    acceptSample(rawC, nowMs, MAX31855_FILTER_ALPHA);
+  } else {
+    rejectSample(rawC, nowMs);
   }
 
   return true;
@@ -91,12 +141,9 @@ bool TemperatureSensor::updateNtc(uint32_t nowMs) {
   const uint16_t adcMilliVolts = static_cast<uint16_t>(
       milliVoltSum / static_cast<uint32_t>(NTC_ADC_SAMPLE_COUNT));
 
-  reading_.rawRtd = 0;
+  clearBackendDiagnostics();
   reading_.rawAdc = rawAdc;
   reading_.adcMilliVolts = adcMilliVolts;
-  reading_.max31865Fault = 0;
-  reading_.ntcFault = NTC_FAULT_NONE;
-  reading_.sensorResistanceOhms = NAN;
 
   if (adcMilliVolts <= NTC_ADC_MIN_VALID_MV) {
     reading_.ntcFault = NTC_IS_HIGH_SIDE ? NTC_FAULT_OPEN : NTC_FAULT_SHORT;
@@ -189,15 +236,17 @@ void TemperatureSensor::rejectSample(float fallbackRawC, uint32_t nowMs) {
 }
 
 const char *TemperatureSensor::backendName() const {
-#if USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K
   return "100k NTC";
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  return "MAX31855 K";
 #else
-  return "MAX31865/PT100";
+  return "MAX31865 PT100";
 #endif
 }
 
 const char *TemperatureSensor::faultDescription() const {
-#if USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K
   const uint8_t fault = reading_.ntcFault;
   if (fault & NTC_FAULT_OPEN) return "NTC open circuit";
   if (fault & NTC_FAULT_SHORT) return "NTC short circuit";
@@ -205,6 +254,18 @@ const char *TemperatureSensor::faultDescription() const {
   if (fault & NTC_FAULT_TEMPERATURE_RANGE) return "NTC temperature invalid";
   if (fault & NTC_FAULT_ADC) return "NTC ADC fault";
   if (!reading_.valid) return "Invalid NTC temperature";
+  return "No sensor fault";
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  const uint8_t fault = reading_.max31855Fault;
+  if (fault & MAX31855_FAULT_OPEN) return "Thermocouple open";
+  if (fault & MAX31855_FAULT_SHORT_GND) return "Thermocouple short to GND";
+  if (fault & MAX31855_FAULT_SHORT_VCC) return "Thermocouple short to VCC";
+  if (!std::isfinite(reading_.coldJunctionC)) return "Cold junction invalid";
+  if (reading_.coldJunctionC < MAX31855_MIN_COLD_JUNCTION_C ||
+      reading_.coldJunctionC > MAX31855_MAX_COLD_JUNCTION_C) {
+    return "Cold junction out of range";
+  }
+  if (!reading_.valid) return "Invalid thermocouple temperature";
   return "No sensor fault";
 #else
   const uint8_t fault = reading_.max31865Fault;

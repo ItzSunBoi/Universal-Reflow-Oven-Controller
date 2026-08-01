@@ -5,14 +5,14 @@
 // -----------------------------------------------------------------------------
 // Target hardware: ESP32-S3-WROOM-1-N16, Arduino-ESP32 3.x
 // Display: 240x240 ST7789 module with NO exposed CS pin
-// Temperature: selectable MAX31865/PT100 or temporary 100 kOhm NTC backend
+// Temperature: selectable MAX31855/K-type, MAX31865/PT100, or 100 kOhm NTC
 // Heater: zero-cross AC SSR, time-proportioned output
 // -----------------------------------------------------------------------------
 
 // The CS-less display is permanently selected, so it must not share SCK/MOSI
 // with another SPI peripheral. The ESP32-S3 provides two independent general-
 // purpose SPI controllers, used here as FSPI for the display and HSPI for the
-// MAX31865.
+// selected digital temperature sensor.
 
 // Physical connector groups on the reused carrier PCB:
 // A: GPIO13, GPIO14, GPIO35 + 3.3 V + GND
@@ -67,10 +67,12 @@ constexpr uint32_t TFT_SPI_HZ = 40000000UL;
 // -----------------------------------------------------------------------------
 // Temperature sensor backend
 // -----------------------------------------------------------------------------
-// Set to 1 for the temporary 100 kOhm NTC divider. Set back to 0 when the
-// MAX31865/PT100 is repaired or replaced. Both implementations remain compiled
-// into the project source; this flag only selects which backend is initialized.
-#define USE_NTC_100K_SENSOR 1
+// Select exactly one backend. All three implementations remain in the source,
+// so changing sensor hardware only requires changing TEMP_SENSOR_BACKEND.
+#define TEMP_SENSOR_BACKEND_MAX31865 0
+#define TEMP_SENSOR_BACKEND_NTC_100K 1
+#define TEMP_SENSOR_BACKEND_MAX31855 2
+#define TEMP_SENSOR_BACKEND TEMP_SENSOR_BACKEND_MAX31855
 
 // 100 kOhm NTC input. GPIO9 is ADC1-capable on ESP32-S3 and reuses the
 // MAX31865 SDO connector position while the MAX31865 backend is disabled.
@@ -104,6 +106,15 @@ constexpr float RTD_NOMINAL_OHMS = 100.0f;    // PT100
 constexpr float RTD_REFERENCE_OHMS = 4300.0f;  // Confirm fitted reference resistor
 constexpr uint8_t RTD_WIRE_COUNT = 2;         // 2, 3, or 4
 constexpr bool RTD_USE_50HZ_FILTER = true;    // Tanzania / UK mains frequency
+
+// MAX31855K thermocouple interface. It is read-only SPI, so there is no SDI/
+// MOSI connection. These aliases reuse the same group-E wires as MAX31865.
+constexpr int8_t PIN_MAX31855_SCK = PIN_MAX31865_CLK;
+constexpr int8_t PIN_MAX31855_SO  = PIN_MAX31865_SDO;
+constexpr int8_t PIN_MAX31855_CS  = PIN_MAX31865_CS;
+constexpr float MAX31855_FILTER_ALPHA = 0.22f;
+constexpr float MAX31855_MIN_COLD_JUNCTION_C = -40.0f;
+constexpr float MAX31855_MAX_COLD_JUNCTION_C = 125.0f;
 
 // User controls. Buttons connect the GPIO to GND when pressed.
 constexpr int8_t PIN_BUTTON_LEFT   = 4;
@@ -217,8 +228,9 @@ constexpr uint8_t fanOffLevel() {
   return FAN_ACTIVE_HIGH ? LOW : HIGH;
 }
 
-static_assert(USE_NTC_100K_SENSOR == 0 || USE_NTC_100K_SENSOR == 1,
-              "USE_NTC_100K_SENSOR must be 0 or 1");
+static_assert(TEMP_SENSOR_BACKEND >= TEMP_SENSOR_BACKEND_MAX31865 &&
+                  TEMP_SENSOR_BACKEND <= TEMP_SENSOR_BACKEND_MAX31855,
+              "TEMP_SENSOR_BACKEND is invalid");
 static_assert(PIN_SSR >= 0, "SSR pin must be configured");
 static_assert(PIN_NTC_ADC >= 1 && PIN_NTC_ADC <= 10,
               "NTC ADC should use an ESP32-S3 ADC1 GPIO (1-10)");
@@ -233,9 +245,15 @@ static_assert(NTC_ADC_MIN_VALID_MV < NTC_ADC_MAX_VALID_MV,
 static_assert(NTC_ADC_MAX_VALID_MV < NTC_DIVIDER_SUPPLY_MV,
               "NTC maximum ADC voltage must be below divider supply");
 static_assert(PIN_TFT_SCK != PIN_MAX31865_CLK,
-              "CS-less TFT and MAX31865 must use separate clock pins");
+              "CS-less TFT and temperature sensor must use separate clock pins");
 static_assert(PIN_TFT_MOSI != PIN_MAX31865_SDI,
-              "CS-less TFT and MAX31865 must use separate data pins");
+              "CS-less TFT and MAX31865 must use separate MOSI pins");
+static_assert(PIN_TFT_SCK != PIN_MAX31855_SCK,
+              "CS-less TFT and MAX31855 must use separate clock pins");
+static_assert(PIN_MAX31855_SO >= 0,
+              "MAX31855 SO/MISO pin must be configured");
+static_assert(MAX31855_FILTER_ALPHA > 0.0f && MAX31855_FILTER_ALPHA <= 1.0f,
+              "MAX31855 filter alpha must be in (0, 1]");
 static_assert(UI_DIRTY_TILE_SIZE > 0 && (240 % UI_DIRTY_TILE_SIZE) == 0,
               "UI dirty tile size must divide the 240-pixel panel");
 static_assert(BUTTON_EVENT_QUEUE_LENGTH >= 8,

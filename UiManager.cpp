@@ -1604,17 +1604,15 @@ void UiManager::drawAbout() {
   drawHeader("ABOUT");
   drawPanel(12, 44, 216, 157);
   drawCentered("Universal Reflow", 57, 2, cCyan_);
-  drawCentered("Controller 1.9.3", 79, 2, cText_);
+  drawCentered("Controller 1.10.0", 79, 2, cText_);
 
   drawFittedText("ESP32-S3-WROOM-1-N16", 22, 107, 196, 16, 1, cMuted_,
                  TextAlign::LEFT);
-#if USE_NTC_100K_SENSOR
-  drawFittedText("ST7789 240x240 + 100k NTC", 22, 126, 196, 16, 1,
-                 cMuted_, TextAlign::LEFT);
-#else
-  drawFittedText("ST7789 240x240 + MAX31865", 22, 126, 196, 16, 1,
-                 cMuted_, TextAlign::LEFT);
-#endif
+  char sensorLine[48];
+  snprintf(sensorLine, sizeof(sensorLine), "ST7789 240x240 + %s",
+           sensor_.backendName());
+  drawFittedText(sensorLine, 22, 126, 196, 16, 1, cMuted_,
+                 TextAlign::LEFT);
   drawFittedText("Profiles stored in NVS flash", 22, 145, 196, 16, 1,
                  cMuted_, TextAlign::LEFT);
   drawFittedText("Use a thermal fuse and enclosure", 22, 172, 196, 16, 1,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Adafruit_MAX31855.h>
 #include <Adafruit_MAX31865.h>
 #include <SPI.h>
 
@@ -10,7 +11,7 @@ class TemperatureSensor {
  public:
   explicit TemperatureSensor(SPIClass &spi);
 
-  // wireMode is used only when USE_NTC_100K_SENSOR is 0.
+  // wireMode is only used by the MAX31865/PT100 backend.
   bool begin(max31865_numwires_t wireMode = MAX31865_3WIRE);
   bool update(uint32_t nowMs);
   const TemperatureReading &reading() const { return reading_; }
@@ -23,7 +24,12 @@ class TemperatureSensor {
   float calibrationOffset() const { return calibrationOffsetC_; }
   const char *faultDescription() const;
   const char *backendName() const;
-  bool usingNtc() const { return USE_NTC_100K_SENSOR != 0; }
+  bool usingNtc() const {
+    return TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K;
+  }
+  bool usingMax31855() const {
+    return TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855;
+  }
 
  private:
   enum NtcFault : uint8_t {
@@ -36,11 +42,14 @@ class TemperatureSensor {
   };
 
   bool updateMax31865(uint32_t nowMs);
+  bool updateMax31855(uint32_t nowMs);
   bool updateNtc(uint32_t nowMs);
+  void clearBackendDiagnostics();
   void acceptSample(float rawC, uint32_t nowMs, float filterAlpha);
   void rejectSample(float fallbackRawC, uint32_t nowMs);
 
-  Adafruit_MAX31865 max_;
+  Adafruit_MAX31865 max31865_;
+  Adafruit_MAX31855 max31855_;
   TemperatureReading reading_{};
   uint32_t lastSampleMs_ = 0;
   uint8_t consecutiveFailures_ = 0;

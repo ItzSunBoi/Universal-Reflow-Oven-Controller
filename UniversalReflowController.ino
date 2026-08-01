@@ -1,4 +1,5 @@
 #include <Adafruit_GFX.h>
+#include <Adafruit_MAX31855.h>
 #include <Adafruit_MAX31865.h>
 #include <SPI.h>
 
@@ -18,7 +19,7 @@
 // The display has no exposed CS pin and is permanently selected. It therefore
 // receives its own hardware SPI controller and physical SCK/MOSI wires.
 SPIClass displaySpi(FSPI);
-SPIClass max31865Spi(HSPI);
+SPIClass temperatureSpi(HSPI);
 
 // Custom driver reproducing the known-working no-CS mode-2 command stream.
 CslessST7789 display(displaySpi, PIN_TFT_DC, PIN_TFT_RST);
@@ -26,7 +27,7 @@ CslessST7789 display(displaySpi, PIN_TFT_DC, PIN_TFT_RST);
 BacklightController backlight;
 ButtonInput buttons;
 ProfileStore profileStore;
-TemperatureSensor temperatureSensor(max31865Spi);
+TemperatureSensor temperatureSensor(temperatureSpi);
 HeaterController heater;
 ReflowEngine reflowEngine(heater);
 PidAutotuner pidAutotuner(heater);
@@ -45,8 +46,11 @@ max31865_numwires_t configuredWireMode() {
 }
 
 void initializePeripheralPins() {
-#if !USE_NTC_100K_SENSOR
-  // The TFT has no CS line. Only the MAX31865 CS needs an idle level.
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  // MAX31855 is read-only SPI; keep CS inactive before HSPI startup.
+  pinMode(PIN_MAX31855_CS, OUTPUT);
+  digitalWrite(PIN_MAX31855_CS, HIGH);
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31865
   pinMode(PIN_MAX31865_CS, OUTPUT);
   digitalWrite(PIN_MAX31865_CS, HIGH);
 #endif
@@ -85,16 +89,19 @@ void updateCoolingFan() {
 
 void printStartupSummary() {
   Serial.println();
-  Serial.println("Universal Reflow Controller v1.9.3");
+  Serial.println("Universal Reflow Controller v1.10.0");
   Serial.println("Target: ESP32-S3-WROOM-1-N16");
   Serial.printf("TFT FSPI mode 2: SCK=%d MOSI=%d CS=none DC=%d RST=%d init=%lu Hz draw=%lu Hz\n",
                 PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_DC, PIN_TFT_RST,
                 static_cast<unsigned long>(TFT_INIT_SPI_HZ),
                 static_cast<unsigned long>(TFT_SPI_HZ));
-#if USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_NTC_100K
   Serial.printf("Temperature: 100k NTC on ADC GPIO%d, beta=%.0f, fixed=%.1f ohm\n",
                 PIN_NTC_ADC, NTC_BETA_COEFFICIENT_K,
                 NTC_FIXED_RESISTOR_OHMS);
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  Serial.printf("Temperature: MAX31855K HSPI SCK=%d SO=%d CS=%d MOSI=none\n",
+                PIN_MAX31855_SCK, PIN_MAX31855_SO, PIN_MAX31855_CS);
 #else
   Serial.printf("Temperature: MAX31865 HSPI CLK=%d SDI=%d SDO=%d CS=%d\n",
                 PIN_MAX31865_CLK, PIN_MAX31865_SDI,
@@ -131,11 +138,16 @@ void setup() {
   }
   backlight.off();
 
-#if !USE_NTC_100K_SENSOR
+#if TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31855
+  // MAX31855 uses read-only SPI. GPIO18/SDI is deliberately not connected and
+  // HSPI is initialized with MOSI disabled.
+  temperatureSpi.begin(PIN_MAX31855_SCK, PIN_MAX31855_SO, -1,
+                       PIN_MAX31855_CS);
+#elif TEMP_SENSOR_BACKEND == TEMP_SENSOR_BACKEND_MAX31865
   // Independent physical buses are mandatory because the display is always
-  // selected and would interpret MAX31865 clock edges as display traffic.
-  max31865Spi.begin(PIN_MAX31865_CLK, PIN_MAX31865_SDO,
-                    PIN_MAX31865_SDI, PIN_MAX31865_CS);
+  // selected and would interpret temperature-sensor clock edges as display traffic.
+  temperatureSpi.begin(PIN_MAX31865_CLK, PIN_MAX31865_SDO,
+                       PIN_MAX31865_SDI, PIN_MAX31865_CS);
 #endif
 
   // This uses the exact configuration proven on the physical module:
